@@ -21,8 +21,33 @@
   --warn: #e08656;
   --regress: #d0658c;
   --grid-line: #222630;
+  --overlay-bg: rgba(14, 15, 18, 0.97);
   --font-display: 'Fraunces', Georgia, serif;
   --font-ui: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+/* Light theme — used as a soft-diffused photography light source that
+   illuminates the user's face through the monitor. Warm cream tone
+   (≈ 5000K) rather than pure white: cleaner skin rendering for
+   MediaPipe iris detection than blue-white, less eye fatigue than
+   harsh white, and stays visually warm with the amber accent.
+   Opt in with `body.light-theme` (or the footer toggle). */
+body.light-theme {
+  --bg:                    #fbf3e2;
+  --bg-elevated:           #f5ecd7;
+  --bg-brick:              #fdf7e8;
+  --bg-brick-active:       #ffeec9;
+  --bg-brick-hint-empty:   #f1e8d1;
+  --fg:                    #2a1f12;
+  --fg-dim:                #6d5a42;
+  --fg-faint:              #b0a184;
+  --accent:                #b8783a;       /* deeper amber for contrast on cream */
+  --accent-dim:            #d9a86a;
+  --ok:                    #4e8c44;
+  --warn:                  #b8563b;
+  --regress:               #a8456a;
+  --grid-line:             #e8ddbe;
+  --overlay-bg:            rgba(251, 243, 226, 0.97);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }

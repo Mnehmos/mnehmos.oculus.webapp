@@ -10,7 +10,7 @@
 #calibration-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(14, 15, 18, 0.97);
+  background: var(--overlay-bg);
   z-index: 100;
   display: flex;
   flex-direction: column;
@@ -34,7 +34,7 @@
   padding-top: 24px;
 }
 #calibration-overlay.cal-passthrough #cal-intro {
-  background: rgba(14, 15, 18, 0.85);
+  background: var(--overlay-bg);
   border: 1px solid var(--grid-line, #2a2d34);
   border-radius: 6px;
   padding: 16px 24px;
@@ -45,7 +45,7 @@
   margin-bottom: 0;
 }
 #calibration-overlay.cal-passthrough #cal-progress {
-  background: rgba(14, 15, 18, 0.85);
+  background: var(--overlay-bg);
   border: 1px solid var(--grid-line, #2a2d34);
   padding: 4px 10px;
   border-radius: 4px;
@@ -303,7 +303,7 @@
 .brick .diagram {
   width: 100%;
   height: 180px;
-  background: #0a0b0d;
+  background: var(--bg);
   border: 1px solid var(--grid-line);
   display: flex;
   align-items: center;

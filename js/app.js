@@ -32,6 +32,12 @@ const App = {
     this.state.showCursor = window.OCULUS_CONFIG.SHOW_CURSOR_DEFAULT;
     this.state.cursorEl = document.getElementById('gaze-cursor');
 
+    // Restore lighting preference ("oculus-lighting" in localStorage).
+    // Light theme turns the monitor into a diffused cream-white key light
+    // to improve MediaPipe iris detection — bigger usable signal than
+    // any resolution bump on a webcam.
+    this._applyLighting(localStorage.getItem('oculus-lighting') || 'dark');
+
     const params = new URLSearchParams(window.location.search);
     this.state.lessonId = params.get('lesson') || 'gravity';
 
@@ -80,6 +86,23 @@ const App = {
 
     const startBtn = document.getElementById('cal-start-btn');
     startBtn.addEventListener('click', () => this._runCalibrationThenPlay());
+
+    // Lighting toggle on the intro, mirrors the footer button and shares
+    // the same localStorage key so the preference persists.
+    const introLightBtn = document.getElementById('cal-intro-lighting');
+    if (introLightBtn) {
+      const syncLabel = () => {
+        introLightBtn.textContent = document.body.classList.contains('light-theme')
+          ? 'Lighting: ON'
+          : 'Lighting: OFF';
+      };
+      syncLabel();
+      introLightBtn.addEventListener('click', () => {
+        const current = document.body.classList.contains('light-theme') ? 'light' : 'dark';
+        this._applyLighting(current === 'light' ? 'dark' : 'light');
+        syncLabel();
+      });
+    }
   },
 
   async _runCalibrationThenPlay() {
@@ -214,6 +237,21 @@ const App = {
     const nextBtn = document.getElementById('btn-next-page');
     if (prevBtn) prevBtn.addEventListener('click', () => this._changePage(-1));
     if (nextBtn) nextBtn.addEventListener('click', () => this._changePage(1));
+
+    const lightBtn = document.getElementById('btn-toggle-lighting');
+    if (lightBtn) {
+      lightBtn.addEventListener('click', () => {
+        const current = document.body.classList.contains('light-theme') ? 'light' : 'dark';
+        this._applyLighting(current === 'light' ? 'dark' : 'light');
+      });
+    }
+  },
+
+  _applyLighting(mode) {
+    document.body.classList.toggle('light-theme', mode === 'light');
+    localStorage.setItem('oculus-lighting', mode);
+    const btn = document.getElementById('btn-toggle-lighting');
+    if (btn) btn.textContent = mode === 'light' ? 'LIGHTING: ON' : 'LIGHTING: DARK';
   },
 
   _changePage(delta) {
