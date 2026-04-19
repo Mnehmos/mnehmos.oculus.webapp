@@ -43,6 +43,7 @@ const ExportSession = {
       ),
       events: Events.state.events,
       hintsFired: Controller.state.hintsFired,
+      readerCursor: window.ReaderCursor ? window.ReaderCursor.exportStats() : null,
       confidenceStream: cfg.EXPORT_CONFIDENCE_STREAM
         ? (window.Gaze && window.Gaze._confidenceStream) || []
         : null,

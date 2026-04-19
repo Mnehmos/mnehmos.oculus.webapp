@@ -68,6 +68,11 @@ const Content = {
         }
         const content = document.createElement('div');
         content.innerHTML = brick.html;
+        // Wrap each word in a <span class="word"> so ReaderCursor can
+        // highlight / dwell-track at word granularity. Skips text nodes
+        // inside code, equations, SVG — anything where word boundaries
+        // would break rendering.
+        this.wrapWords(content);
         body.appendChild(content);
         el.appendChild(body);
       }
@@ -108,6 +113,69 @@ const Content = {
    */
   bricksOnPage(container, pageNum) {
     return Array.from(container.querySelectorAll(`.brick[data-page="${pageNum}"]`));
+  },
+
+  /**
+   * Walk text nodes inside `root` and wrap each whitespace-separated
+   * word in <span class="word">. Skips nodes inside tags or classes
+   * where word-level spans would break rendering (code, equations,
+   * SVG diagrams).
+   *
+   * Called once per brick at render time. Idempotent enough — if the
+   * root already contains .word spans they'll be skipped because
+   * they're inside a parent we don't filter; but don't call twice.
+   */
+  wrapWords(root) {
+    const SKIP_TAGS = new Set([
+      'CODE', 'PRE',
+      'SVG', 'G', 'PATH', 'CIRCLE', 'LINE', 'RECT', 'TEXT', 'DEFS',
+      'MARKER', 'POLYGON', 'POLYLINE', 'ELLIPSE',
+      'SCRIPT', 'STYLE',
+    ]);
+    const SKIP_CLASSES = new Set(['equation', 'diagram']);
+
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        let p = node.parentNode;
+        while (p && p !== root) {
+          if (p.nodeType === Node.ELEMENT_NODE) {
+            if (SKIP_TAGS.has(p.tagName)) return NodeFilter.FILTER_REJECT;
+            if (p.classList) {
+              for (const cls of SKIP_CLASSES) {
+                if (p.classList.contains(cls)) return NodeFilter.FILTER_REJECT;
+              }
+            }
+          }
+          p = p.parentNode;
+        }
+        return NodeFilter.FILTER_ACCEPT;
+      },
+    });
+
+    const textNodes = [];
+    let n;
+    while ((n = walker.nextNode())) textNodes.push(n);
+
+    for (const textNode of textNodes) {
+      const text = textNode.nodeValue;
+      if (!text || !text.trim()) continue;
+
+      // Split preserving whitespace runs so we don't collapse spaces.
+      const parts = text.split(/(\s+)/);
+      const frag = document.createDocumentFragment();
+      for (const part of parts) {
+        if (part.length === 0) continue;
+        if (/^\s+$/.test(part)) {
+          frag.appendChild(document.createTextNode(part));
+        } else {
+          const span = document.createElement('span');
+          span.className = 'word';
+          span.textContent = part;
+          frag.appendChild(span);
+        }
+      }
+      textNode.parentNode.replaceChild(frag, textNode);
+    }
   },
 
   /**

@@ -143,16 +143,30 @@ const App = {
     this.state.tracking = true;
     this._updatePageIndicator();
 
+    // Boot the mouse-driven reader cursor. It runs in parallel with gaze
+    // and takes over Events when the mouse is moving; gaze falls back in
+    // during periods of mouse idle.
+    if (window.ReaderCursor) window.ReaderCursor.init();
+
     // Main loop: MediaPipe → features → classifier → brick id → Events
     const frame = () => {
       if (!this.state.tracking) return;
       Events.recordSample();
       const brickId = Gaze.tick(this.state.cursorEl, this.state.showCursor);
-      Events.processBrick(brickId, (eventType, bId) => {
-        if (eventType === 'stall' || eventType === 'regression') {
-          Controller.maybeFireHint(bId);
-        }
-      });
+
+      // Gaze fires events only when the mouse isn't currently driving.
+      // ReaderCursor already calls Events.processBrick from its mousemove
+      // handler, so during active reading with mouse the brick events
+      // come from the more reliable source.
+      const mouseActive = window.ReaderCursor && window.ReaderCursor.tickActivity();
+      if (!mouseActive) {
+        Events.processBrick(brickId, (eventType, bId) => {
+          if (eventType === 'stall' || eventType === 'regression') {
+            Controller.maybeFireHint(bId);
+          }
+        });
+      }
+
       this.state.rafHandle = requestAnimationFrame(frame);
     };
     this.state.rafHandle = requestAnimationFrame(frame);

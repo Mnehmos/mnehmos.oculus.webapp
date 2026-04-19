@@ -449,6 +449,37 @@
 }
 #gaze-cursor.hidden { opacity: 0; }
 
+/* ---------------- READER CURSOR + WORD HIGHLIGHTS (v0.2+) ---------------- */
+
+/* Mouse-driven reader cursor. Positioned via JS at mousemove; follows
+   the mouse tip. Visually distinct from the gaze cursor (softer, larger,
+   amber ring) so the user can see both when the gaze stream is on. */
+#reader-cursor {
+  position: fixed;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  background: rgba(244, 184, 96, 0.08);
+  box-shadow: 0 0 12px rgba(244, 184, 96, 0.35);
+  pointer-events: none;
+  z-index: 95;
+  transform: translate(-50%, -50%);
+  transition: opacity 0.15s ease;
+}
+#reader-cursor.hidden { opacity: 0; }
+
+/* Word under the mouse gets a subtle amber backing. This is how the
+   user knows Oculus is tracking them at word granularity. */
+.word {
+  transition: background 0.1s ease;
+  border-radius: 2px;
+}
+.word.reading {
+  background: rgba(244, 184, 96, 0.22);
+  box-shadow: 0 0 0 1px rgba(244, 184, 96, 0.35);
+}
+
 /* ---------------- FOOTER CONTROLS ---------------- */
 
 .footer-controls {
