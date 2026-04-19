@@ -67,14 +67,27 @@ window.OCULUS_CONFIG = {
     'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.34/wasm',
 
   // --- Classifier ---
-  // GAZE_MODE: 'regression' | 'classification'
-  //   'regression' (default): model outputs continuous (x, y) viewport
-  //     coords and Oculus hit-tests with elementsFromPoint. Scroll-invariant,
-  //     layout-agnostic, bricks can be added/moved without retraining.
-  //   'classification': model outputs a brick-id probability distribution
-  //     directly. Faster at inference, more robust per-sample, but requires
-  //     scroll lock and retrains on any layout change. (Original v0.2 design.)
+  // GAZE_MODE: backwards-compat default for GAZE_HEADS (see below).
+  //   'regression':     predict (x, y) viewport coords, hit-test at read
+  //                     time. Scroll-invariant, layout-agnostic.
+  //   'classification': predict brick-id distribution directly. Requires
+  //                     scroll lock; retrains on layout change.
   GAZE_MODE: 'regression',
+
+  // GAZE_HEADS: optional multi-head ensemble. When set, Classifier trains
+  // every head in the array on the same calibration data and reports
+  // per-head predictions at inference. The FIRST head is primary (drives
+  // events + cursor); remaining heads are monitored in telemetry and
+  // logged to session export.
+  //
+  // When null/undefined (default), a single head is built from GAZE_MODE.
+  //
+  // Examples (uncomment to try):
+  //   [{ tag: 'R', mode: 'regression' },
+  //    { tag: 'C', mode: 'classification' }]
+  //   [{ tag: 'R1', mode: 'regression' },
+  //    { tag: 'R2', mode: 'regression', hiddenUnits: 32, lr: 0.005 }]
+  GAZE_HEADS: null,
 
   FEATURE_VECTOR_DIM: 24,
   CLASSIFIER_HIDDEN_UNITS: 16,

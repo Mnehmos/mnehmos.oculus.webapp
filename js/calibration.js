@@ -87,17 +87,12 @@ window.Calibration = {
     }
 
     const allSamples = [];
-    const allLabels  = [];
+    const allRegLabels = [];
+    const allClsLabels = [];
 
     if (mode === 'regression') {
-      // Show all pages at once; user scrolls as needed (or we scroll
-      // on their behalf in _collectForBrick). The classifier learns
-      // (iris, head pose) → (viewport x, y) and is page-agnostic.
       for (const p of allPages) window.Content.showPage(gridEl, p);
-      const showAll = () => {
-        for (const el of allBricks) el.classList.remove('page-hidden');
-      };
-      showAll();
+      for (const el of allBricks) el.classList.remove('page-hidden');
       await new Promise(r => requestAnimationFrame(r));
 
       for (const b of contentBricksAll) b.classList.add('cal-dim');
@@ -112,9 +107,10 @@ window.Calibration = {
           page: parseInt(brickEl.dataset.page, 10),
           totalPages: allPages.length,
         });
-        const { samples, labels } = await this._collectForBrick(brickEl);
+        const { samples, regLabels, clsLabels } = await this._collectForBrick(brickEl);
         allSamples.push(...samples);
-        allLabels.push(...labels);
+        allRegLabels.push(...regLabels);
+        allClsLabels.push(...clsLabels);
       }
 
       for (const b of contentBricksAll) b.classList.remove('cal-dim', 'cal-active');
@@ -139,9 +135,10 @@ window.Calibration = {
             page,
             totalPages: allPages.length,
           });
-          const { samples, labels } = await this._collectForBrick(brickEl);
+          const { samples, regLabels, clsLabels } = await this._collectForBrick(brickEl);
           allSamples.push(...samples);
-          allLabels.push(...labels);
+          allRegLabels.push(...regLabels);
+          allClsLabels.push(...clsLabels);
         }
 
         for (const b of pageContentBricks) b.classList.remove('cal-dim', 'cal-active');
@@ -150,48 +147,61 @@ window.Calibration = {
       window.Content.showPage(gridEl, allPages[0]);
     }
 
-    // ---------- Phase 4: 'elsewhere' samples (classification only) ----------
-    // Regression mode doesn't need an 'elsewhere' class — hit-test
-    // naturally returns null when predicted coords land on non-brick
-    // content, and REGRESSION_EAR_GATE handles blinks.
-    if (mode === 'classification') {
+    // ---------- Phase 4: 'elsewhere' samples ----------
+    // Only needed when at least one head is classification (gives the MLP
+    // a real negative class). Regression heads don't use it.
+    const headConfigs = this._resolveHeadConfigs(cfg, contentBricksAll);
+    const anyClassification = headConfigs.some(h => h.mode === 'classification');
+
+    if (anyClassification) {
       this._renderPhase(introEl, progressEl, 'elsewhere', {});
       const elsewhere = await this._collectElsewhere();
-      allSamples.push(...elsewhere);
-      allLabels.push(...elsewhere.map(() => 'elsewhere'));
+      // Elsewhere samples have a meaningful cls label but no real
+      // regression target — push the viewport center so the MSE loss
+      // doesn't drag regression heads during those frames. Regression
+      // heads won't suffer because elsewhere frames are ~15% of total.
+      for (const f of elsewhere) {
+        allSamples.push(f);
+        allRegLabels.push({ x: 0.5, y: 0.5 });
+        allClsLabels.push('elsewhere');
+      }
     }
 
-    // ---------- Phase 5: train ----------
+    // ---------- Phase 5: train every head ----------
     this._renderPhase(introEl, progressEl, 'training', {});
 
     window.Features.computeNormalization(allSamples);
     const normalizedSamples = allSamples.map(s => window.Features.normalize(s));
 
-    if (mode === 'regression') {
-      window.Classifier.build({ mode: 'regression' });
-    } else {
-      const brickIds = contentBricksAll.map(b => b.dataset.brickId);
-      brickIds.push('elsewhere');
-      window.Classifier.build({ mode: 'classification', brickIds });
-    }
+    window.Classifier.build(headConfigs);
 
-    await window.Classifier.train(normalizedSamples, allLabels, (epoch, logs) => {
-      const lossEl = introEl.querySelector('#cal-train-loss');
-      if (lossEl && logs) {
-        lossEl.textContent = `epoch ${epoch + 1}/${cfg.CLASSIFIER_EPOCHS} · loss ${logs.loss.toFixed(4)}`;
+    await window.Classifier.train(
+      normalizedSamples,
+      { regression: allRegLabels, classification: allClsLabels },
+      (epoch, logs, headTag) => {
+        const lossEl = introEl.querySelector('#cal-train-loss');
+        if (lossEl && logs) {
+          lossEl.textContent =
+            `[${headTag}] epoch ${epoch + 1}/${cfg.CLASSIFIER_EPOCHS} · loss ${logs.loss.toFixed(4)}`;
+        }
       }
-    });
+    );
 
-    // ---------- Phase 6: validate ----------
-    // Held-out 20% of samples (sampled evenly). For classification,
-    // validate() returns top-1 accuracy; for regression, it returns
-    // a 1 - meanErr/200px score (0 bad, 1 perfect).
-    const accuracy = this._holdoutValidate(normalizedSamples, allLabels, 0.2);
+    // ---------- Phase 6: validate every head ----------
+    const headScores = this._holdoutValidateMulti(
+      normalizedSamples,
+      { regression: allRegLabels, classification: allClsLabels },
+      0.2
+    );
+    const primaryTag = window.Classifier.heads[0].tag;
+    const primaryScore = headScores[primaryTag] ?? 0;
     this._renderPhase(introEl, progressEl, 'validation', {
-      accuracy: accuracy,
+      accuracy: primaryScore,
       threshold: cfg.VALIDATION_ACCURACY_THRESHOLD,
-      mode,
-      meanError: window.Classifier.validationError,
+      headScores,
+      primaryTag,
+      primaryMode: window.Classifier.heads[0].mode,
+      meanError: window.Classifier.heads[0].validationError,
     });
 
     if (accuracy < cfg.VALIDATION_ACCURACY_THRESHOLD) {
@@ -277,17 +287,23 @@ window.Calibration = {
     } else if (phase === 'validation') {
       const pct = Math.round(detail.accuracy * 100);
       const ok = detail.accuracy >= detail.threshold;
-      const errText = detail.mode === 'regression' && detail.meanError != null
-        ? `Mean error: <strong>${Math.round(detail.meanError)}px</strong>.`
-        : `Validation accuracy: <strong>${pct}%</strong> (target ≥ ${Math.round(detail.threshold * 100)}%).`;
+      const headScoresRows = Object.entries(detail.headScores || {}).map(([tag, score]) => {
+        const pctH = Math.round(score * 100);
+        const isPrimary = tag === detail.primaryTag;
+        return `<div class="cal-head-row">${isPrimary ? '★ ' : '&nbsp; '}${tag}: <strong>${pctH}%</strong></div>`;
+      }).join('');
+      const primaryErrText = detail.primaryMode === 'regression' && detail.meanError != null
+        ? ` · mean error ${Math.round(detail.meanError)}px`
+        : '';
       introEl.innerHTML = `
         <div class="cal-title">${ok ? 'Ready.' : 'Calibration a bit shaky.'}</div>
         <div class="cal-subtitle">
-          ${errText}
+          Primary head: <strong>${pct}%</strong>${primaryErrText}.
           ${ok
             ? ' Starting the lesson in a moment…'
-            : ' Quality is below threshold. Continue as-is or recalibrate.'}
+            : ' Below threshold &mdash; continue or recalibrate.'}
         </div>
+        <div class="cal-head-scores">${headScoresRows}</div>
       `;
       if (progressEl) progressEl.textContent = 'phase 6 / 7 · validation';
 
@@ -369,6 +385,9 @@ window.Calibration = {
   async _collectForBrick(brickEl) {
     const cfg = window.OCULUS_CONFIG;
     const brickId = brickEl.dataset.brickId;
+    // The multi-head system needs BOTH label kinds always, because we
+    // don't yet know which heads are enabled. Collect both; the trainer
+    // will only feed each head the matching kind.
     const mode = cfg.GAZE_MODE || 'regression';
 
     // Spotlight this brick
@@ -409,8 +428,11 @@ window.Calibration = {
     document.body.appendChild(dot);
     document.body.appendChild(progress);
 
+    // Each per-frame entry holds both label kinds so downstream we can
+    // feed regression heads and classification heads from the same data.
     const samples = [];
-    const labels = [];
+    const regLabels = [];
+    const clsLabels = [];
 
     // Wait for click on the dot
     await new Promise(resolve => {
@@ -421,16 +443,13 @@ window.Calibration = {
       dot.addEventListener('click', onClick);
     });
 
-    // Re-measure AFTER the click — the user may have scrolled slightly,
-    // or we may have scrolled when the next brick was off-screen.
+    // Re-measure AFTER the click (user may have scrolled slightly).
     const rectNow = brickEl.getBoundingClientRect();
     const targetPxX = rectNow.left + rectNow.width / 2;
     const targetPxY = rectNow.top  + rectNow.height / 2;
-    // Normalized viewport coords [0, 1] for regression mode.
     const targetNormX = targetPxX / window.innerWidth;
     const targetNormY = targetPxY / window.innerHeight;
 
-    // Collect feature samples over SAMPLE_COLLECTION_DURATION_MS
     const start = performance.now();
     const bar = progress.querySelector('.bar');
     let lastTs = 0;
@@ -443,11 +462,8 @@ window.Calibration = {
       const features = window.Features.extract(result);
       if (features) {
         samples.push(features);
-        if (mode === 'regression') {
-          labels.push({ x: targetNormX, y: targetNormY });
-        } else {
-          labels.push(brickId);
-        }
+        regLabels.push({ x: targetNormX, y: targetNormY });
+        clsLabels.push(brickId);
       }
       const pct = Math.min(100, ((performance.now() - start) / cfg.SAMPLE_COLLECTION_DURATION_MS) * 100);
       if (bar) bar.style.width = pct + '%';
@@ -460,7 +476,7 @@ window.Calibration = {
     brickEl.classList.remove('cal-active');
     brickEl.classList.add('cal-dim');
 
-    return { samples, labels };
+    return { samples, regLabels, clsLabels };
   },
 
   // ============================================================
@@ -495,8 +511,34 @@ window.Calibration = {
   //   Validation
   // ============================================================
 
-  _holdoutValidate(samples, labels, holdoutFraction) {
-    if (samples.length === 0) return 0;
+  /**
+   * Determine the head-config array to build. Reads OCULUS_CONFIG.GAZE_HEADS
+   * (explicit), otherwise falls back to a single head built from GAZE_MODE.
+   * Fills in classification brickIds from the visible content bricks so
+   * authors don't have to maintain that list in two places.
+   */
+  _resolveHeadConfigs(cfg, contentBricksAll) {
+    const brickIds = contentBricksAll.map(b => b.dataset.brickId);
+    const brickIdsWithElsewhere = brickIds.concat(['elsewhere']);
+
+    const raw = cfg.GAZE_HEADS && cfg.GAZE_HEADS.length > 0
+      ? cfg.GAZE_HEADS
+      : [{ tag: 'primary', mode: cfg.GAZE_MODE || 'regression' }];
+
+    return raw.map(h => {
+      if (h.mode === 'classification' && (!h.brickIds || h.brickIds.length === 0)) {
+        return { ...h, brickIds: brickIdsWithElsewhere };
+      }
+      return h;
+    });
+  },
+
+  /**
+   * Multi-head holdout: runs Classifier.validate with held-out samples,
+   * returning a { [tag]: score } map.
+   */
+  _holdoutValidateMulti(samples, labelsByMode, holdoutFraction) {
+    if (samples.length === 0) return {};
     const n = Math.max(1, Math.floor(samples.length * holdoutFraction));
     const indices = [];
     const step = Math.max(1, Math.floor(samples.length / n));
@@ -504,7 +546,10 @@ window.Calibration = {
       indices.push(i);
     }
     const heldSamples = indices.map(i => samples[i]);
-    const heldLabels  = indices.map(i => labels[i]);
+    const heldLabels = {
+      regression: indices.map(i => labelsByMode.regression[i]),
+      classification: indices.map(i => labelsByMode.classification[i]),
+    };
     return window.Classifier.validate(heldSamples, heldLabels);
   },
 

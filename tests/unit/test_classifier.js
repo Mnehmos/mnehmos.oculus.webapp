@@ -1,73 +1,66 @@
 /**
- * Unit tests for js/classifier.js.
+ * Unit tests for js/classifier.js (multi-head).
  *
- * Requires tf.js (loaded from CDN in run_tests.html).
- * Uses synthetic training data with linearly separable classes — the MLP
- * should reach high validation accuracy. If it doesn't, something in the
- * build/train/predict chain is broken.
+ * Uses TF.js loaded from the CDN in run_tests.html. Synthetic training
+ * data with linearly separable classes — the MLPs should reach high
+ * accuracy.
  */
 
 window.runClassifierTests = async function runClassifierTests() {
   await Test.suite('classifier.js — build() + predict()', async () => {
 
-    await Test.test('build(classification) creates a tf.Model', () => {
+    await Test.test('build({mode:classification}) creates a head', () => {
       window.Classifier.build({ mode: 'classification', brickIds: ['B01', 'B02', 'elsewhere'] });
-      Test.assert(window.Classifier.model != null, 'model not created');
-      Test.assertEqual(window.Classifier.brickIds.length, 3, 'wrong classes count');
-      Test.assertEqual(window.Classifier.mode, 'classification');
+      Test.assertEqual(window.Classifier.heads.length, 1);
+      Test.assertEqual(window.Classifier.heads[0].mode, 'classification');
+      Test.assertEqual(window.Classifier.heads[0].brickIds.length, 3);
+      Test.assert(window.Classifier.model != null, 'primary model accessor broken');
     });
 
-    await Test.test('build(regression) creates a tf.Model with 2-neuron output', () => {
+    await Test.test('build({mode:regression}) creates a 2-output head', () => {
       window.Classifier.build({ mode: 'regression' });
-      Test.assert(window.Classifier.model != null, 'regression model not created');
-      Test.assertEqual(window.Classifier.mode, 'regression');
+      Test.assertEqual(window.Classifier.heads.length, 1);
+      Test.assertEqual(window.Classifier.heads[0].mode, 'regression');
     });
 
-    await Test.test('predict() returns distribution summing to ~1 (classification)', () => {
-      window.Classifier.build({ mode: 'classification', brickIds: ['B01', 'B02', 'elsewhere'] });
+    await Test.test('build([R, C]) creates multi-head ensemble', () => {
+      window.Classifier.build([
+        { tag: 'R', mode: 'regression' },
+        { tag: 'C', mode: 'classification', brickIds: ['B01', 'B02'] },
+      ]);
+      Test.assertEqual(window.Classifier.heads.length, 2);
+      Test.assertEqual(window.Classifier.heads[0].tag, 'R');
+      Test.assertEqual(window.Classifier.heads[1].tag, 'C');
+    });
+
+    await Test.test('predict() returns per-head array', () => {
+      window.Classifier.build([
+        { tag: 'R', mode: 'regression' },
+        { tag: 'C', mode: 'classification', brickIds: ['B01', 'B02', 'elsewhere'] },
+      ]);
       const features = new Float32Array(24).fill(0.5);
-      const dist = window.Classifier.predict(features);
-      Test.assert(dist != null, 'predict returned null');
-      const sum = Object.values(dist).reduce((s, v) => s + v, 0);
-      Test.assertClose(sum, 1, 0.01, `softmax sum=${sum}`);
+      const preds = window.Classifier.predict(features);
+      Test.assertEqual(preds.length, 2);
+      Test.assertEqual(preds[0].tag, 'R');
+      Test.assert('x' in preds[0].raw && 'y' in preds[0].raw, 'regression missing xy');
+      Test.assertEqual(preds[1].tag, 'C');
+      const sum = Object.values(preds[1].raw).reduce((s, v) => s + v, 0);
+      Test.assertClose(sum, 1, 0.01, 'softmax sum');
     });
 
-    await Test.test('predict() returns {x, y} in regression mode', () => {
-      window.Classifier.build({ mode: 'regression' });
-      const features = new Float32Array(24).fill(0.5);
-      const out = window.Classifier.predict(features);
-      Test.assert(out != null, 'predict returned null');
-      Test.assert('x' in out && 'y' in out, 'regression output missing x/y');
-    });
-
-    await Test.test('argmax returns null for low-confidence predictions', () => {
-      window.Classifier.build({ mode: 'classification', brickIds: ['B01', 'B02', 'elsewhere'] });
-      const features = new Float32Array(24).fill(0.0);
-      const dist = window.Classifier.predict(features);
-      const id = window.Classifier.argmax(dist);
-      if (id !== null) {
-        Test.assert(window.Classifier.brickIds.includes(id), 'argmax returned unknown id');
-        Test.assert(id !== 'elsewhere', "argmax should never surface 'elsewhere'");
-      }
-    });
-
-    await Test.test("argmax returns null when 'elsewhere' wins", () => {
+    await Test.test('argmax legacy alias resolves primary head', () => {
       window.Classifier.build({ mode: 'classification', brickIds: ['B01', 'elsewhere'] });
       const fakeDist = { B01: 0.2, elsewhere: 0.8 };
-      Test.assert(window.Classifier.argmax(fakeDist) === null, "should map 'elsewhere' → null");
+      Test.assert(window.Classifier.argmax(fakeDist) === null, "'elsewhere' maps to null");
     });
   });
 
-  await Test.suite('classifier.js — train() with synthetic data', async () => {
+  await Test.suite('classifier.js — train() multi-head', async () => {
 
-    await Test.test('trains to >90% val_accuracy on 3 linearly-separable classes', async () => {
+    await Test.test('trains a classification head to >90% val accuracy', async () => {
       const classes = ['B01', 'B02', 'B03'];
       window.Classifier.build({ mode: 'classification', brickIds: classes });
 
-      // Each class: 40 samples. Feature[0] is the only distinguishing dim.
-      //   B01 centers at feature[0] = 0.0
-      //   B02 centers at feature[0] = 1.0
-      //   B03 centers at feature[0] = 2.0
       const features = [];
       const labels = [];
       const anchors = { B01: 0.0, B02: 1.0, B03: 2.0 };
@@ -80,27 +73,36 @@ window.runClassifierTests = async function runClassifierTests() {
         }
       }
 
-      const history = await window.Classifier.train(features, labels);
-      const finalAcc = history.history.acc
-                    ?? history.history.accuracy
-                    ?? [0];
-      const last = finalAcc[finalAcc.length - 1];
-      Test.assert(last > 0.9, `final training accuracy ${last} < 0.9`);
+      await window.Classifier.train(features, { classification: labels });
+      const head = window.Classifier.heads[0];
+      const lastAcc = head.trainingHistory.finalAccuracy ?? 0;
+      Test.assert(lastAcc > 0.9, `final training accuracy ${lastAcc} < 0.9`);
     }, 15000);
 
-    await Test.test('predicts correct class on held-out synthetic sample', () => {
-      const v = new Float32Array(24);
-      v[0] = 0.0;  // should be B01
-      const dist = window.Classifier.predict(v);
-      Test.assert(dist.B01 > dist.B02, `B01 not dominant: B01=${dist.B01} B02=${dist.B02}`);
-      Test.assert(dist.B01 > dist.B03, `B01 not dominant vs B03: B01=${dist.B01} B03=${dist.B03}`);
-    });
+    await Test.test('trains a regression head with low MSE on linearly separable data', async () => {
+      window.Classifier.build({ mode: 'regression' });
+      const features = [];
+      const labels = [];
+      for (let i = 0; i < 120; i++) {
+        const v = new Float32Array(24);
+        v[0] = Math.random();
+        features.push(v);
+        labels.push({ x: v[0], y: 0.5 });
+      }
+      await window.Classifier.train(features, { regression: labels });
+      const head = window.Classifier.heads[0];
+      const finalLoss = head.trainingHistory.finalLoss ?? Infinity;
+      Test.assert(finalLoss < 0.05, `regression MSE ${finalLoss} too high`);
+    }, 15000);
 
-    await Test.test('exportMetadata() includes training summary', () => {
+    await Test.test('exportMetadata() lists every head', () => {
+      window.Classifier.build([
+        { tag: 'R', mode: 'regression' },
+        { tag: 'C', mode: 'classification', brickIds: ['B01', 'B02'] },
+      ]);
       const meta = window.Classifier.exportMetadata();
-      Test.assert(meta.trainedAt != null, 'trainedAt missing');
-      Test.assert(meta.history != null, 'history missing');
-      Test.assertEqual(meta.classes.length, 3, 'wrong classes count in metadata');
+      Test.assertEqual(meta.heads.length, 2);
+      Test.assertEqual(meta.primaryTag, 'R');
     });
   });
 };

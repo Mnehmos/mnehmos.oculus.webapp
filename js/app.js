@@ -51,18 +51,25 @@ const App = {
     });
 
     this.state.gridEl = grid;
-    const mode = window.OCULUS_CONFIG.GAZE_MODE || 'regression';
-    if (mode === 'regression') {
-      // Regression mode is scroll-invariant; show every brick at once
-      // and let the reader scroll naturally. Pagination fields on bricks
-      // still carry authorial intent (soft chapter breaks) but don't
-      // hide anything.
+
+    // Pagination behavior depends on the primary head's mode:
+    //   regression        → one-page-everything, user scrolls (scroll-
+    //                       invariant hit-test handles layout shifts).
+    //   classification    → paginate, no scroll.
+    // We can't know the primary mode until after Classifier.build, which
+    // happens inside Calibration.run. Read GAZE_HEADS[0] if present;
+    // otherwise fall back to GAZE_MODE.
+    const cfg = window.OCULUS_CONFIG;
+    const primaryMode =
+      (cfg.GAZE_HEADS && cfg.GAZE_HEADS[0] && cfg.GAZE_HEADS[0].mode) ||
+      cfg.GAZE_MODE ||
+      'regression';
+
+    if (primaryMode === 'regression') {
       this.state.totalPages = 1;
       this.state.currentPage = 1;
       grid.querySelectorAll('.brick').forEach(el => el.classList.remove('page-hidden'));
     } else {
-      // Classification mode: paginate to avoid scroll (brick-to-screen
-      // mapping must stay stable).
       this.state.totalPages = Content.totalPages(lesson);
       this.state.currentPage = 1;
       Content.showPage(grid, 1);
@@ -128,6 +135,7 @@ const App = {
       hints:      document.getElementById('m-hints'),
       confidence: document.getElementById('m-confidence'),
       headPose:   document.getElementById('m-head-pose'),
+      headsRow:   document.getElementById('m-heads'),
       heatmap:    document.getElementById('heatmap'),
       eventLog:   document.getElementById('event-log'),
     });

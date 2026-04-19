@@ -76,7 +76,6 @@ const Telemetry = {
       }
     }
 
-    // head pose: yaw/pitch in degrees
     const hpEl = this.els.headPose;
     if (hpEl) {
       if (!gp.faceDetected) {
@@ -87,6 +86,21 @@ const Telemetry = {
         const pitchDeg = (gp.headPose.pitch * rad2deg).toFixed(1);
         hpEl.textContent = `y${yawDeg}° p${pitchDeg}°`;
       }
+    }
+
+    // Multi-head: show each head's current brick id. Primary is marked
+    // with a star; ensemble (majority across heads) is shown last.
+    const headsEl = this.els.headsRow;
+    if (headsEl && gp.perHead) {
+      const primaryTag = window.Classifier?.heads?.[window.Classifier.primaryIdx || 0]?.tag;
+      const parts = Object.entries(gp.perHead).map(([tag, id]) => {
+        const marker = tag === primaryTag ? '★' : '·';
+        return `${marker}${tag}=${id || '—'}`;
+      });
+      if (gp.ensembleBrickId !== undefined) {
+        parts.push(`Σ=${gp.ensembleBrickId || '—'}`);
+      }
+      headsEl.textContent = parts.join(' ');
     }
   },
 

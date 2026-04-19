@@ -59,9 +59,10 @@ window.runPipelineTests = async function runPipelineTests() {
         const featureRows = rawFixtures.map(f => window.Features.extract(f));
         window.Features.computeNormalization(featureRows);
         const normalized = featureRows.map(f => window.Features.normalize(f));
-        await window.Classifier.train(normalized, labels);
+        await window.Classifier.train(normalized, { classification: labels });
 
-        const acc = window.Classifier.validate(normalized, labels);
+        const scores = window.Classifier.validate(normalized, { classification: labels });
+        const acc = scores[window.Classifier.heads[0].tag];
         Test.assert(acc > 0.85, `training accuracy ${acc} too low (check features?)`);
       }, 20000);
 
