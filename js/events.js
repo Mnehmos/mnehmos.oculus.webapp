@@ -29,7 +29,8 @@ const Events = {
     gazeSamples: 0,
     currentBrick: null,
     currentBrickEnteredAt: null,
-    visited: new Set(),
+    visited: new Set(),         // bricks that had at least one DWELL_MS_MIN visit
+    firstReadFired: new Set(),  // bricks whose first_read event has already fired
     bricks: {},            // brickId -> { dwellTotal, visits, regressions, stalls, lastExitAt, ... }
     events: [],            // full typed event log for session export
     lastRegressionAt: 0,   // global cooldown timestamp for regression events
@@ -40,6 +41,7 @@ const Events = {
     this.state.bricks = {};
     this.state.events = [];
     this.state.visited = new Set();
+    this.state.firstReadFired = new Set();
     this.state.currentBrick = null;
     this.state.currentBrickEnteredAt = null;
     this.state.lastRegressionAt = 0;
@@ -94,11 +96,11 @@ const Events = {
           const wasFirstVisit = !this.state.visited.has(prevBrickId);
 
           if (wasFirstVisit) {
+            // First qualifying visit — mark as visited (regression-eligible
+            // on future re-entry) but DON'T yet fire first_read. That
+            // event is gated on cumulative dwell ≥ FIRST_READ_MIN_DWELL_MS.
             this.state.visited.add(prevBrickId);
             prev.visits++;
-            this._log('first_read', prevBrickId,
-              `type=${prev.type}, dwell=${Math.round(dwell)}ms`, source);
-            onEvent && onEvent('first_read', prevBrickId, prev);
 
           } else if (prev._pendingEntryIsRegression) {
             // Global cooldown: even if a single brick cooled down per se,
@@ -130,6 +132,10 @@ const Events = {
               `dwell ${Math.round(dwell)}ms (expected ~${prev.expectedDwell}ms)`, source);
             onEvent && onEvent('stall', prevBrickId, prev);
           }
+
+          // First-read check: cumulative dwell now past the minimum?
+          this._maybeFireFirstRead(prevBrickId, source, 'cumulative-dwell',
+            prev, onEvent);
         }
 
         prev._pendingEntryIsRegression = false;
@@ -170,6 +176,44 @@ const Events = {
 
   recordSample() {
     this.state.gazeSamples++;
+  },
+
+  /**
+   * Fire first_read on a brick iff:
+   *   - it hasn't already fired
+   *   - either the cumulative dwell threshold is met (gaze path)
+   *     OR the caller passes a hard-trigger reason (mouse-reached-last-word)
+   *
+   * `reason` is included in the log detail so downstream analysis can
+   * distinguish "read because they spent 3s here" from "read because
+   * their mouse traversed the whole brick."
+   */
+  _maybeFireFirstRead(brickId, source, reason, brickStateOrNull, onEvent) {
+    const cfg = window.OCULUS_CONFIG;
+    if (this.state.firstReadFired.has(brickId)) return false;
+    const brick = brickStateOrNull || this.state.bricks[brickId];
+    if (!brick) return false;
+
+    const threshold = cfg.FIRST_READ_MIN_DWELL_MS;
+    const cumulative = Math.round(brick.dwellTotal);
+    const hardTrigger = reason === 'reached-last-word';
+    if (!hardTrigger && cumulative < threshold) return false;
+
+    this.state.firstReadFired.add(brickId);
+    this._log('first_read', brickId,
+      `type=${brick.type}, cumulative=${cumulative}ms, via=${reason}`, source);
+    onEvent && onEvent('first_read', brickId, brick);
+    return true;
+  },
+
+  /**
+   * Public trigger used by the mouse path: ReaderCursor calls this when
+   * the mouse dwells on the LAST word of a brick, which is a reliable
+   * "actually finished reading" signal regardless of dwell totals.
+   */
+  fireFirstReadFromMouse(brickId) {
+    return this._maybeFireFirstRead(brickId, 'mouse', 'reached-last-word',
+      null, null);
   },
 
   _log(type, brickId, detail, source) {

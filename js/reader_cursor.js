@@ -57,8 +57,15 @@ window.ReaderCursor = {
 
   config: {
     ACTIVE_DWELL_MS: 300,         // word dwell before we capture a sample
-    MOUSE_ACTIVE_WINDOW_MS: 2000, // mouse "active" if moved in this window
+    MOUSE_ACTIVE_WINDOW_MS: 1000, // mouse "active" if moved in this window
+                                   // (shorter = gaze recovers faster when
+                                   // the mouse is abandoned mid-session)
     SAMPLE_MIN_INTERVAL_MS: 200,  // rate-limit sample captures per word
+    LAST_WORD_DWELL_MS: 300,      // mouse on last word ≥ this → first_read
+    MOUSE_PARK_DISTANCE_PX: 300,  // if gaze/mouse disagree by > this AND
+                                   // mouse is idle ≥ PARK_IDLE_MS, treat
+                                   // mouse as parked (not reading).
+    MOUSE_PARK_IDLE_MS: 500,
   },
 
   _lastSampleAt: 0,
@@ -118,6 +125,20 @@ window.ReaderCursor = {
       if (word) word.classList.add('reading');
       this.state.currentWord = word;
       this.state.wordEnteredAt = now;
+    }
+
+    // Mouse-on-last-word trigger for first_read. If the mouse has been
+    // dwelling on the final word of a brick for LAST_WORD_DWELL_MS, the
+    // user has traversed the whole brick — fire first_read directly
+    // rather than waiting for brick exit + cumulative-dwell threshold.
+    if (word && brick && this.state.wordEnteredAt
+        && (now - this.state.wordEnteredAt) >= this.config.LAST_WORD_DWELL_MS) {
+      const words = brick.querySelectorAll('.word');
+      if (words.length > 0 && words[words.length - 1] === word) {
+        if (window.Events && window.Events.fireFirstReadFromMouse) {
+          window.Events.fireFirstReadFromMouse(brick.dataset.brickId);
+        }
+      }
     }
 
     // Brick change → fire pedagogical events through the existing pipe
@@ -208,16 +229,42 @@ window.ReaderCursor = {
 
   /**
    * Polled by app.js each frame to decide whether mouse should be
-   * considered "currently driving" (so gaze defers). Deactivates
-   * after MOUSE_ACTIVE_WINDOW_MS without movement.
+   * considered "currently driving" (so gaze defers).
+   *
+   * Two deactivation triggers:
+   *   1. MOUSE_ACTIVE_WINDOW_MS of no movement → stale.
+   *   2. Mouse idle ≥ MOUSE_PARK_IDLE_MS AND gaze prediction is more than
+   *      MOUSE_PARK_DISTANCE_PX from the mouse → mouse is parked while
+   *      the user's eyes are reading elsewhere. Gaze should take over
+   *      immediately instead of waiting for the idle window to elapse.
    */
   tickActivity() {
     const now = performance.now();
-    if (this.state.active
-        && (now - this.state.lastMoveAt) > this.config.MOUSE_ACTIVE_WINDOW_MS) {
+    if (!this.state.active) return false;
+
+    const idle = now - this.state.lastMoveAt;
+
+    if (idle > this.config.MOUSE_ACTIVE_WINDOW_MS) {
       this._clearActive();
+      return false;
     }
-    return this.state.active;
+
+    // Park check: only fires if the mouse is idle-ish AND gaze has a
+    // real prediction to disagree with.
+    if (idle >= this.config.MOUSE_PARK_IDLE_MS) {
+      const gp = window.Gaze && window.Gaze.lastPrediction;
+      if (gp && gp.coords && gp.faceDetected) {
+        const dx = gp.coords.x - this.state.mouseX;
+        const dy = gp.coords.y - this.state.mouseY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > this.config.MOUSE_PARK_DISTANCE_PX) {
+          this._clearActive();
+          return false;
+        }
+      }
+    }
+
+    return true;
   },
 
   /**

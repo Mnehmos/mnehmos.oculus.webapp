@@ -21,6 +21,13 @@ window.OCULUS_CONFIG = {
   // Minimum ms in a brick before it counts as "visited" (filters flyover).
   DWELL_MS_MIN: 400,
 
+  // A brick only counts as "first read" once its CUMULATIVE dwell across
+  // all visits crosses this threshold. Brief glances are still counted
+  // as visits but don't produce the first_read event — you can't read
+  // an 8-second paragraph in 400ms. The mouse-read path can fire this
+  // early if the user's mouse has actually traversed to the last word.
+  FIRST_READ_MIN_DWELL_MS: 2500,
+
   // A brick is "stalled" when actual dwell exceeds expected dwell by this
   // multiplier. E.g. expected=6000ms, multiplier=1.6 → stall at 9600ms.
   STALL_MULTIPLIER: 1.6,
