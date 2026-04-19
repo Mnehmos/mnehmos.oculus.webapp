@@ -68,7 +68,7 @@ window.FaceLandmarker = {
     let MPFaceLandmarker, FilesetResolver;
     try {
       const mod = await import(
-        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/vision_bundle.mjs'
+        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.34/vision_bundle.mjs'
       );
       MPFaceLandmarker = mod.FaceLandmarker;
       FilesetResolver = mod.FilesetResolver;

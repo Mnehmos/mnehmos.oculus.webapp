@@ -64,7 +64,7 @@ window.OCULUS_CONFIG = {
     'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
   // WASM/JS binaries served alongside @mediapipe/tasks-vision from jsDelivr.
   MEDIAPIPE_WASM_URL:
-    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm',
+    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.34/wasm',
 
   // --- Classifier ---
   FEATURE_VECTOR_DIM: 24,
