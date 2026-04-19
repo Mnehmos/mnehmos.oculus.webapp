@@ -445,25 +445,6 @@
 }
 #gaze-cursor.hidden { opacity: 0; }
 
-/* ---------------- WEBGAZER VIDEO FEED ---------------- */
-
-.webgazerVideoFeed, #webgazerVideoFeed {
-  position: fixed !important;
-  bottom: 8px !important;
-  right: 8px !important;
-  width: 160px !important;
-  height: 120px !important;
-  z-index: 50 !important;
-  border: 1px solid var(--grid-line) !important;
-  opacity: 0.4;
-  transition: opacity 0.3s;
-}
-.webgazerVideoFeed:hover { opacity: 1; }
-#webgazerVideoContainer { z-index: 50 !important; }
-#webgazerFaceOverlay, #webgazerFaceFeedbackBox {
-  display: none !important;
-}
-
 /* ---------------- FOOTER CONTROLS ---------------- */
 
 .footer-controls {
