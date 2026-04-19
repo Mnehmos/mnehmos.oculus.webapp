@@ -10,13 +10,16 @@ Oculus watches where your eyes move across a lesson and offers context-specific 
 
 ## Features
 
-- **100% Client-Side**: Webcam processing happens in your browser via [WebGazer.js](https://webgazer.cs.brown.edu/). No data leaves your device.
+- **100% Client-Side**: Webcam processing happens in your browser via [MediaPipe Face Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker) + an in-browser [TensorFlow.js](https://www.tensorflow.org/js) MLP classifier. No data leaves your device.
+- **Classifier-Direct AOI**: Instead of tracking gaze as (x,y) and hit-testing against the page, Oculus classifies each frame directly to a brick id. 24 geometric features (iris position, eye openness, head pose, blendshapes) → per-session MLP → brick probability distribution.
+- **Per-Brick Calibration**: Calibration *is* a preview of the lesson. Look at each brick in turn, click to confirm, ~50 frames are captured. The MLP trains in a second.
 - **Brick-Based Content Model**: Lessons are structured as paragraph-sized bricks. Webcam gaze resolves reliably at that granularity.
 - **Typed Attention Events**: Reading behavior is decoded into a stream of typed events — `first_read`, `stall`, `regression`, `hint_fill`.
 - **Contextual Hint Slots**: Every content brick can have an adjacent hint brick. Hints fill with pre-authored help when confusion is detected on the associated content.
-- **Live Telemetry Pane**: See the system's model of your reading in real time — current brick, dwell time, heatmap, event log.
-- **Session Export**: Every session can be exported as a JSON blob with the full typed-event record. This is the raw data for pedagogy research.
+- **Live Telemetry Pane**: See the system's model of your reading in real time — current brick, dwell time, heatmap, event log, classifier confidence, head pose.
+- **Session Export**: Every session can be exported as a JSON blob with the full typed-event record + classifier metadata. This is the raw data for pedagogy research.
 - **Two Starter Lessons**: Physics (gravity & equivalence principle) and Computer Science (recursion) ship by default. New lessons are JSON files — no code changes needed.
+- **All Permissively Licensed**: MediaPipe Apache 2.0, TensorFlow.js Apache 2.0, Oculus MIT. No GPL contamination.
 
 ---
 
@@ -24,8 +27,12 @@ Oculus watches where your eyes move across a lesson and offers context-specific 
 
 1. Open the app in a desktop browser with a webcam (Chrome/Firefox/Edge/Safari, recent).
 2. Pick a lesson from the landing page.
-3. Click **Begin Calibration**. Look at each of nine dots and click them.
-4. Read the lesson normally. Watch the telemetry pane fill up as the system builds its model of your attention.
+3. Click **Begin Calibration**. The flow is:
+   - A camera preview shows you your face. Wait for "face detected".
+   - Each content brick lights up in turn. Look at the amber dot at its center and click.
+   - Finally, look away or close your eyes for three seconds ("elsewhere" samples).
+   - The classifier trains in about a second and reports validation accuracy.
+4. Read the lesson normally. Watch the telemetry pane fill up — `confidence` shows how sure the classifier is about the current brick; `head pose` shows how much you've drifted from calibration.
 5. If you stall or regress, an adjacent hint slot will fill.
 6. Export the session at the end if you want the data.
 
@@ -44,37 +51,60 @@ oculus.webapp/
 ├── js/
 │   ├── config.js              # Tunable thresholds (one place to edit)
 │   ├── content.js             # Lesson loader + brick renderer
-│   ├── calibration.js         # 9-point WebGazer calibration flow
-│   ├── gaze.js                # Sample smoothing + brick hit-testing
+│   ├── face_landmarker.js     # MediaPipe Face Landmarker wrapper
+│   ├── features.js            # Geometric feature extraction (24-dim vector)
+│   ├── classifier.js          # TF.js MLP, per-session training
+│   ├── calibration.js         # Per-brick calibration flow
+│   ├── gaze.js                # Per-frame pipeline tick + temporal smoothing
 │   ├── events.js              # Typed event detector
 │   ├── controller.js          # Hint-fire policy
 │   ├── telemetry.js           # Live pane updates, heatmap
 │   ├── export.js              # Session → JSON download
 │   └── app.js                 # Main entry, module wire-up
-└── content/
-    └── lessons/
-        ├── gravity.json       # Physics lesson
-        └── recursion.json     # CS lesson
+├── content/
+│   └── lessons/
+│       ├── gravity.json       # Physics lesson
+│       └── recursion.json     # CS lesson
+└── tests/
+    ├── run_tests.html         # In-browser test runner
+    ├── fixtures/              # Synthetic MediaPipe fixtures
+    └── unit/                  # test_features, test_classifier, test_gaze_pipeline
 ```
 
-### Data Flow
+### Data Flow (v0.2)
 
 ```
 Webcam
   ↓
-WebGazer (raw gaze sample, ~30Hz)
+MediaPipe Face Landmarker (~30Hz)
   ↓
-Gaze.processSample()         ← smooths with rolling average
+  ├── 478 face landmarks (468 face-mesh + 10 iris)
+  ├── 52 blendshape coefficients
+  └── facialTransformationMatrixes (head pose, cm)
   ↓
-Brick hit-test (elementsFromPoint)
+Features.extract()           ← 24-dim vector: iris-relative xy per eye,
+                               EAR per eye, head yaw/pitch/roll/distance,
+                               face center, blendshape passthroughs
   ↓
-Events.processBrick()        ← transitions → typed events
+Features.normalize()         ← z-score against calibration statistics
   ↓
-  ├── Telemetry.tick()       ← live pane + heatmap
-  └── Controller.maybeFireHint()  ← policy decision
+Classifier.predict()         ← MLP softmax → {brickId: prob}
+  ↓
+Classifier.argmax()          ← apply CONFIDENCE_THRESHOLD; 'elsewhere' → null
+  ↓
+Gaze.tick() majority vote    ← window of N recent predictions
+  ↓
+Events.processBrick()        ← transitions → typed events (unchanged from v0.1)
+  ↓
+  ├── Telemetry.tick()       ← live pane + heatmap + confidence + head pose
+  └── Controller.maybeFireHint()  ← policy decision (unchanged from v0.1)
         ↓
       (fills hint slot if eligible)
 ```
+
+Everything from `Events.processBrick` downstream is shared with v0.1 —
+v0.2 swaps the lower half of the stack (camera → brick id) while keeping
+the pedagogy-event layer stable.
 
 ### The Brick Model
 
@@ -112,7 +142,13 @@ All thresholds live in `js/config.js`. Expect to adjust them as you collect real
 
 | Variable                          | Default | Controls                                          |
 |-----------------------------------|---------|---------------------------------------------------|
-| `SAMPLE_SMOOTHING`                | 5       | Rolling-average window for gaze cursor            |
+| `PREDICTION_SMOOTHING_WINDOW`     | 5       | Frames in the majority-vote window                |
+| `PREDICTION_SMOOTHING_MIN_AGREE`  | 3       | Agreeing frames required to emit a brick id      |
+| `CONFIDENCE_THRESHOLD`            | 0.4     | Min softmax max-prob to trust a prediction        |
+| `SAMPLES_PER_BRICK`               | 50      | Calibration samples collected per content brick   |
+| `SAMPLE_COLLECTION_DURATION_MS`   | 1500    | Time window for one brick's sample collection     |
+| `VALIDATION_ACCURACY_THRESHOLD`   | 0.7     | Min post-training accuracy before leaving calib.  |
+| `CLASSIFIER_EPOCHS`               | 100     | Training epochs for the per-session MLP           |
 | `DWELL_MS_MIN`                    | 400     | Minimum ms in a brick to count as "visited"       |
 | `STALL_MULTIPLIER`                | 1.6     | Stall = dwell > expected × this                   |
 | `REGRESSION_COOLDOWN_MS`          | 2000    | Grace period before re-entry counts as regression |
@@ -125,8 +161,8 @@ All thresholds live in `js/config.js`. Expect to adjust them as you collect real
 ## Privacy
 
 - **No backend.** The server serves static files only; everything reactive runs in your browser.
-- **No external requests after first load.** WebGazer.js is fetched from a CDN on first visit; Google Fonts loads too. After that, the tab runs offline.
-- **No gaze data is transmitted.** The webcam feed is processed in your browser's JS context and never sent anywhere.
+- **No external requests after first load.** MediaPipe + TensorFlow.js + the face-landmarker model are fetched from CDNs on first visit; Google Fonts loads too. After that, the tab runs offline.
+- **No gaze data is transmitted.** The webcam feed is processed in your browser's JS context and never sent anywhere. The per-session classifier also lives only in memory.
 - **Session data is ephemeral.** Closing the tab discards everything. The Export Session button downloads a JSON blob to your machine only.
 
 ---
@@ -179,9 +215,18 @@ Place it immediately after the content brick it's paired with. The grid will ren
 ## Known Limitations
 
 1. **Webcam gaze accuracy caps out around paragraph-scale bricks.** Word-level gaze tracking requires dedicated hardware (Tobii, EyeLink). Oculus is designed around the accuracy webcam gaze actually delivers.
-2. **Calibration drift with head movement.** WebGazer's regression model assumes your head stays roughly still. Significant movement degrades accuracy. A recalibrate button is provided.
-3. **No persistence across sessions.** Session data lives in memory and is lost on reload. Exports are the only mechanism to keep data.
+2. **Calibration drift with head movement.** The classifier trains on the head pose at calibration time. Large drift degrades accuracy. Watch the `head pose` telemetry; recalibrate if yaw or pitch strays beyond ~10°.
+3. **No persistence across sessions.** The trained classifier lives in memory and is lost on reload — every session starts with a fresh calibration. Exports are the only mechanism to keep data. (IndexedDB persistence is planned for v0.3.)
 4. **Pre-authored hints, not LLM-generated.** The beta ships with hand-written hints per brick. An LLM-generated variant is a natural next step once trigger policy is validated.
+
+## Testing
+
+```bash
+python -m http.server 8765
+# Open http://localhost:8765/tests/run_tests.html in Chrome
+```
+
+The suite has 26+ tests across `test_features`, `test_classifier`, and `test_gaze_pipeline`. It stubs MediaPipe with `window.Fixtures` so it runs without a webcam.
 
 ---
 
