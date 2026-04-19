@@ -95,17 +95,11 @@ window.OCULUS_CONFIG = {
   CLASSIFIER_BATCH_SIZE: 16,
   CLASSIFIER_LEARNING_RATE: 0.01,
 
-  // Calibration dot motion.
-  //
-  // The dot traces a smooth spiral: its radius follows a bell envelope
-  // sin²(πt), which is 0 at t=0 and t=1 and peaks at t=0.5, while its
-  // angular position advances continuously at FOLLOW_REVOLUTIONS per
-  // total duration. No hold → move → return phase transitions — the
-  // dot starts stationary-at-center (radius 0), eases outward, revolves,
-  // and eases back to center. User's eyes follow naturally.
-  FOLLOW_DURATION_MS: 2600,
-  FOLLOW_REVOLUTIONS: 1.25,
-  FOLLOW_RADIUS_RATIO: 0.35,
+  // Calibration dot is stationary during sample collection. The earlier
+  // scanning-spiral approach produced labels the user's eyes couldn't
+  // track perfectly (saccade delay + head micromotion meant the label
+  // position didn't match the actual gaze at that instant). Stationary
+  // targets with a denser grid of points gives cleaner training data.
   // Classification mode only: if argmax probability < threshold, emit null.
   CONFIDENCE_THRESHOLD: 0.55,
   // Regression mode only: blink gate — if average EAR < this, emit null
@@ -123,9 +117,12 @@ window.OCULUS_CONFIG = {
   //             user's eyes track the moving content.
   CALIBRATION_METHOD: 'grid',
 
-  // Grid parameters (used when CALIBRATION_METHOD = 'grid')
+  // Grid parameters (used when CALIBRATION_METHOD = 'grid').
+  // 4x3 = 12 points — denser than a 3x3 = 9 grid. Extra coverage helps
+  // the regression model more than a moving dot does (an animated dot
+  // relies on the user's eyes perfectly tracking it, which they don't).
   GRID_ROWS: 3,
-  GRID_COLS: 3,
+  GRID_COLS: 4,
   // Edge margin as fraction of viewport (how close to the screen edge
   // the outermost dots get). 0.1 = 10% inset from each edge.
   GRID_EDGE_MARGIN_PCT: 0.1,
@@ -142,7 +139,12 @@ window.OCULUS_CONFIG = {
   ELSEWHERE_SAMPLE_DURATION_MS: 3000,
   // Minimum post-training validation accuracy before we leave calibration.
   // Below this, offer the user a recalibrate option.
-  VALIDATION_ACCURACY_THRESHOLD: 0.7,
+  // For regression, health = 1 - meanError/200px. 0.5 = mean error 100px,
+  // which is roughly one brick's vertical span — usable for paragraph-level
+  // gaze. Webcam gaze physically can't do much better than ~1° visual
+  // angle (~50px at typical laptop distances), so 100px is a realistic
+  // target, not a "shaky" one.
+  VALIDATION_ACCURACY_THRESHOLD: 0.5,
 
   // --- Blink detection ---
   EAR_BLINK_THRESHOLD: 0.22,

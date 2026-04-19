@@ -266,11 +266,12 @@ window.Calibration = {
 
     } else if (phase === 'grid') {
       introEl.innerHTML = `
-        <div class="cal-title">Look at the dot &mdash; follow it as it moves</div>
+        <div class="cal-title">Look at the dot &mdash; click when steady</div>
         <div class="cal-subtitle">
-          When your eyes are steady on the glowing dot, click it. It will
-          trace a small circle &mdash; keep your eyes on it throughout.
-          Keep your head still between clicks.
+          Stare at the glowing dot. Click it when your gaze is locked.
+          Hold still for about a second while Oculus records a sample,
+          then the next dot will appear. Keep your head in roughly the
+          same position throughout.
         </div>
       `;
       if (progressEl) {
@@ -488,18 +489,15 @@ window.Calibration = {
       dot.addEventListener('click', onClick);
     });
 
-    // Re-measure AFTER the click. The dot will animate within the brick
-    // over the collection window — user's eyes follow — so the regression
-    // model gets a gradient signal ("as iris moves right, target x moves
-    // right") rather than N point-targets. Classification label stays
-    // the brick id throughout.
+    // Re-measure AFTER the click — user may have scrolled slightly.
     const rectNow = brickEl.getBoundingClientRect();
     const cxView = rectNow.left + rectNow.width / 2;
     const cyView = rectNow.top  + rectNow.height / 2;
-    const radius = Math.min(rectNow.width, rectNow.height) * cfg.FOLLOW_RADIUS_RATIO;
 
-    const totalMs = cfg.FOLLOW_DURATION_MS;
-    const revolutions = cfg.FOLLOW_REVOLUTIONS;
+    // Stationary dot at brick center. Stare, collect, done.
+    const totalMs = cfg.SAMPLE_COLLECTION_DURATION_MS;
+    const normX = cxView / window.innerWidth;
+    const normY = cyView / window.innerHeight;
 
     const start = performance.now();
     const bar = progress.querySelector('.bar');
@@ -508,21 +506,6 @@ window.Calibration = {
     while (performance.now() - start < totalMs) {
       await new Promise(r => requestAnimationFrame(r));
       const elapsed = performance.now() - start;
-      const t = elapsed / totalMs;
-
-      // Smooth envelope: radius 0 at t=0 and t=1, max at t=0.5.
-      // sin²(πt) gives zero velocity at both endpoints — no jarring
-      // start/stop. The dot appears to "breathe" outward and back in.
-      const radiusRatio = Math.sin(Math.PI * t) ** 2;
-      const angle = t * revolutions * 2 * Math.PI;
-      const currentRadius = radius * radiusRatio;
-      const dotPxX = cxView + currentRadius * Math.cos(angle);
-      const dotPxY = cyView + currentRadius * Math.sin(angle);
-
-      dot.style.left = dotPxX + 'px';
-      dot.style.top  = dotPxY + 'px';
-      progress.style.left = dotPxX + 'px';
-      progress.style.top  = dotPxY + 'px';
 
       const ts = Math.max(lastTs + 1, Math.floor(performance.now()));
       lastTs = ts;
@@ -530,13 +513,10 @@ window.Calibration = {
       const features = window.Features.extract(result);
       if (features) {
         samples.push(features);
-        regLabels.push({
-          x: dotPxX / window.innerWidth,
-          y: dotPxY / window.innerHeight,
-        });
+        regLabels.push({ x: normX, y: normY });
         clsLabels.push(brickId);
       }
-      const pct = Math.min(100, t * 100);
+      const pct = Math.min(100, (elapsed / totalMs) * 100);
       if (bar) bar.style.width = pct + '%';
       if (samples.length >= cfg.SAMPLES_PER_BRICK * 2) break;
     }
@@ -651,8 +631,6 @@ window.Calibration = {
     const vh = window.innerHeight;
     const cxView = point.xFrac * vw;
     const cyView = point.yFrac * vh;
-    // Radius scales with viewport so smaller screens get smaller sweeps.
-    const radius = Math.min(vw, vh) * 0.05;
 
     const dot = document.createElement('div');
     dot.className = 'cal-brick-dot';
@@ -677,9 +655,8 @@ window.Calibration = {
       dot.addEventListener('click', onClick);
     });
 
-    const totalMs = cfg.FOLLOW_DURATION_MS;
-    const revolutions = cfg.FOLLOW_REVOLUTIONS;
-
+    // Stationary dot. Stare at it.
+    const totalMs = cfg.SAMPLE_COLLECTION_DURATION_MS;
     const start = performance.now();
     const bar = progress.querySelector('.bar');
     let lastTs = 0;
@@ -687,21 +664,6 @@ window.Calibration = {
     while (performance.now() - start < totalMs) {
       await new Promise(r => requestAnimationFrame(r));
       const elapsed = performance.now() - start;
-      const t = elapsed / totalMs;
-
-      // Smooth envelope: sin²(πt) — zero velocity at both ends, no jarring
-      // start/stop. Dot eases outward, traces ~1.25 revolutions, eases
-      // back to center.
-      const radiusRatio = Math.sin(Math.PI * t) ** 2;
-      const angle = t * revolutions * 2 * Math.PI;
-      const currentRadius = radius * radiusRatio;
-      const dotPxX = cxView + currentRadius * Math.cos(angle);
-      const dotPxY = cyView + currentRadius * Math.sin(angle);
-
-      dot.style.left = dotPxX + 'px';
-      dot.style.top  = dotPxY + 'px';
-      progress.style.left = dotPxX + 'px';
-      progress.style.top  = dotPxY + 'px';
 
       const ts = Math.max(lastTs + 1, Math.floor(performance.now()));
       lastTs = ts;
@@ -709,9 +671,9 @@ window.Calibration = {
       const features = window.Features.extract(result);
       if (features) {
         samples.push(features);
-        regLabels.push({ x: dotPxX / vw, y: dotPxY / vh });
+        regLabels.push({ x: point.xFrac, y: point.yFrac });
       }
-      const pct = Math.min(100, t * 100);
+      const pct = Math.min(100, (elapsed / totalMs) * 100);
       if (bar) bar.style.width = pct + '%';
       if (samples.length >= cfg.SAMPLES_PER_BRICK * 2) break;
     }
