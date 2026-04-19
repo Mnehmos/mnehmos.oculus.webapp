@@ -63,13 +63,20 @@ window.Calibration = {
       throw new Error('Face detection prewarm timed out');
     }
 
-    // ---------- Phase 3: per-brick sample collection ----------
-    // Reveal the main layout behind the overlay so bricks are visible
-    // under the amber dots during Phase 3.
-    const mainLayout = document.getElementById('main-layout');
-    if (mainLayout) mainLayout.style.visibility = 'visible';
-
+    // ---------- Phase 3: sample collection ----------
+    // Grid method: viewport-fixed dots on the blank calibration overlay.
+    //   No lesson visible, no scroll — calibration only depends on
+    //   gaze-to-viewport mapping, which is exactly what regression needs.
+    // Brick method: amber dot at each content brick's center. Auto-
+    //   scrolls if bricks don't fit. Legacy path; useful when training
+    //   a classification head that needs per-brick labels.
     const mode = cfg.GAZE_MODE || 'regression';
+    const method = cfg.CALIBRATION_METHOD || 'grid';
+
+    // Only reveal the main layout when we actually need bricks visible
+    // (brick method). Grid method keeps the overlay opaque.
+    const mainLayout = document.getElementById('main-layout');
+    if (method === 'brick' && mainLayout) mainLayout.style.visibility = 'visible';
 
     // In regression mode, show EVERY brick simultaneously — the model
     // learns viewport-coord targets and scrolling is expected at read
@@ -90,7 +97,27 @@ window.Calibration = {
     const allRegLabels = [];
     const allClsLabels = [];
 
-    if (mode === 'regression') {
+    if (method === 'grid') {
+      // ---- GRID CALIBRATION ----
+      // Viewport-fixed dots on the calibration overlay. No scroll, no
+      // visible content. Classification labels are not produced (grid
+      // points aren't bricks); if any classification heads are configured
+      // they'll be skipped in _resolveHeadConfigs below.
+      const gridPoints = this._buildGridPoints(cfg);
+      for (let i = 0; i < gridPoints.length; i++) {
+        const pt = gridPoints[i];
+        this._renderPhase(introEl, progressEl, 'grid', {
+          idx: i + 1,
+          total: gridPoints.length,
+          xPct: Math.round(pt.xFrac * 100),
+          yPct: Math.round(pt.yFrac * 100),
+        });
+        const { samples, regLabels } = await this._collectForGridPoint(pt);
+        allSamples.push(...samples);
+        allRegLabels.push(...regLabels);
+      }
+
+    } else if (mode === 'regression') {
       for (const p of allPages) window.Content.showPage(gridEl, p);
       for (const el of allBricks) el.classList.remove('page-hidden');
       await new Promise(r => requestAnimationFrame(r));
@@ -236,6 +263,24 @@ window.Calibration = {
         </div>
       `;
       if (progressEl) progressEl.textContent = 'phase 2 / 7 · detecting face';
+
+    } else if (phase === 'grid') {
+      introEl.innerHTML = `
+        <div class="cal-title">Look at the dot &mdash; follow it as it moves</div>
+        <div class="cal-subtitle">
+          When your eyes are steady on the glowing dot, click it. It will
+          trace a small circle &mdash; keep your eyes on it throughout.
+          Keep your head still between clicks.
+        </div>
+      `;
+      if (progressEl) {
+        progressEl.textContent =
+          `phase 3 / 7 · point ${detail.idx} of ${detail.total}`;
+      }
+      // Grid calibration never uses the passthrough — the overlay stays
+      // opaque so nothing on the page distracts the eye.
+      const overlay = document.getElementById('calibration-overlay');
+      if (overlay) overlay.classList.remove('cal-passthrough');
 
     } else if (phase === 'brick') {
       introEl.innerHTML = `
@@ -560,17 +605,139 @@ window.Calibration = {
   _resolveHeadConfigs(cfg, contentBricksAll) {
     const brickIds = contentBricksAll.map(b => b.dataset.brickId);
     const brickIdsWithElsewhere = brickIds.concat(['elsewhere']);
+    const method = cfg.CALIBRATION_METHOD || 'grid';
 
     const raw = cfg.GAZE_HEADS && cfg.GAZE_HEADS.length > 0
       ? cfg.GAZE_HEADS
       : [{ tag: 'primary', mode: cfg.GAZE_MODE || 'regression' }];
 
-    return raw.map(h => {
+    // Classification heads need per-brick labels; grid calibration doesn't
+    // produce those. Filter them out (with a console warning) when the
+    // user has opted into grid.
+    const filtered = raw.filter(h => {
+      if (method === 'grid' && h.mode === 'classification') {
+        console.warn(`Dropping classification head "${h.tag || '?'}" — grid calibration does not emit per-brick labels.`);
+        return false;
+      }
+      return true;
+    });
+    const resolved = filtered.length > 0
+      ? filtered
+      : [{ tag: 'primary', mode: 'regression' }];
+
+    return resolved.map(h => {
       if (h.mode === 'classification' && (!h.brickIds || h.brickIds.length === 0)) {
         return { ...h, brickIds: brickIdsWithElsewhere };
       }
       return h;
     });
+  },
+
+  /**
+   * Build the N×M grid of calibration points as normalized viewport
+   * fractions [0, 1]. Dots are spread across the viewport with
+   * GRID_EDGE_MARGIN_PCT inset from each edge, so none hug the browser
+   * chrome. Returned top-to-bottom, left-to-right.
+   */
+  _buildGridPoints(cfg) {
+    const rows = Math.max(2, cfg.GRID_ROWS || 3);
+    const cols = Math.max(2, cfg.GRID_COLS || 3);
+    const margin = cfg.GRID_EDGE_MARGIN_PCT ?? 0.1;
+    const pts = [];
+    for (let r = 0; r < rows; r++) {
+      const yFrac = margin + (1 - 2 * margin) * (r / (rows - 1));
+      for (let c = 0; c < cols; c++) {
+        const xFrac = margin + (1 - 2 * margin) * (c / (cols - 1));
+        pts.push({ xFrac, yFrac, row: r, col: c });
+      }
+    }
+    return pts;
+  },
+
+  /**
+   * Grid-point equivalent of _collectForBrick. Places a viewport-fixed
+   * dot at (xFrac, yFrac), waits for click, animates a scan circle,
+   * records (features, normalized-dot-position) per frame.
+   */
+  async _collectForGridPoint(point) {
+    const cfg = window.OCULUS_CONFIG;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const cxView = point.xFrac * vw;
+    const cyView = point.yFrac * vh;
+    // Radius scales with viewport so smaller screens get smaller sweeps.
+    const radius = Math.min(vw, vh) * 0.05;
+
+    const dot = document.createElement('div');
+    dot.className = 'cal-brick-dot';
+    dot.style.left = cxView + 'px';
+    dot.style.top = cyView + 'px';
+    const progress = document.createElement('div');
+    progress.className = 'cal-brick-progress';
+    progress.style.left = cxView + 'px';
+    progress.style.top  = cyView + 'px';
+    progress.innerHTML = '<div class="bar"></div>';
+    document.body.appendChild(dot);
+    document.body.appendChild(progress);
+
+    const samples = [];
+    const regLabels = [];
+
+    await new Promise(resolve => {
+      const onClick = () => {
+        dot.removeEventListener('click', onClick);
+        resolve();
+      };
+      dot.addEventListener('click', onClick);
+    });
+
+    const holdMs   = cfg.FOLLOW_HOLD_MS;
+    const sweepMs  = cfg.FOLLOW_SWEEP_MS;
+    const returnMs = cfg.FOLLOW_RETURN_MS;
+    const totalMs  = holdMs + sweepMs + returnMs;
+
+    const start = performance.now();
+    const bar = progress.querySelector('.bar');
+    let lastTs = 0;
+
+    while (performance.now() - start < totalMs) {
+      await new Promise(r => requestAnimationFrame(r));
+      const elapsed = performance.now() - start;
+
+      let dotPxX = cxView, dotPxY = cyView;
+      if (elapsed < holdMs) {
+        // Hold center
+      } else if (elapsed < holdMs + sweepMs) {
+        const t = (elapsed - holdMs) / sweepMs;
+        const angle = t * 2 * Math.PI;
+        dotPxX = cxView + radius * Math.cos(angle);
+        dotPxY = cyView + radius * Math.sin(angle);
+      } else {
+        const t = (elapsed - holdMs - sweepMs) / returnMs;
+        dotPxX = (cxView + radius) * (1 - t) + cxView * t;
+        dotPxY = cyView;
+      }
+      dot.style.left = dotPxX + 'px';
+      dot.style.top  = dotPxY + 'px';
+      progress.style.left = dotPxX + 'px';
+      progress.style.top  = dotPxY + 'px';
+
+      const ts = Math.max(lastTs + 1, Math.floor(performance.now()));
+      lastTs = ts;
+      const result = window.FaceLandmarker.detectFrame(ts);
+      const features = window.Features.extract(result);
+      if (features) {
+        samples.push(features);
+        regLabels.push({ x: dotPxX / vw, y: dotPxY / vh });
+      }
+      const pct = Math.min(100, (elapsed / totalMs) * 100);
+      if (bar) bar.style.width = pct + '%';
+      if (samples.length >= cfg.SAMPLES_PER_BRICK * 2) break;
+    }
+
+    dot.remove();
+    progress.remove();
+    return { samples, regLabels };
   },
 
   /**

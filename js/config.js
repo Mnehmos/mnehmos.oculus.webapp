@@ -113,7 +113,24 @@ window.OCULUS_CONFIG = {
   REGRESSION_EAR_GATE: 0.16,
 
   // --- Calibration UX ---
-  // Per-brick sample collection
+  //   'grid'  — N×M dots at viewport-fixed positions on a blank overlay;
+  //             user clicks each in sequence. No scroll, lesson-agnostic,
+  //             dense uniform coverage of the regression output space.
+  //             Default and recommended.
+  //   'brick' — one dot per content brick placed at the brick's center;
+  //             user clicks each. Auto-scrolls long lessons so each
+  //             brick is in view. Scroll can corrupt samples if the
+  //             user's eyes track the moving content.
+  CALIBRATION_METHOD: 'grid',
+
+  // Grid parameters (used when CALIBRATION_METHOD = 'grid')
+  GRID_ROWS: 3,
+  GRID_COLS: 3,
+  // Edge margin as fraction of viewport (how close to the screen edge
+  // the outermost dots get). 0.1 = 10% inset from each edge.
+  GRID_EDGE_MARGIN_PCT: 0.1,
+
+  // Per-dot sample collection (applies to both methods)
   SAMPLES_PER_BRICK: 50,
   SAMPLE_COLLECTION_DURATION_MS: 1500,
   // Face-detection prewarm: show the preview, wait for a stable face
