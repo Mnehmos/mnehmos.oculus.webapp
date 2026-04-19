@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Oculus v0.2 — Test Runner</title>
+  <style>
+    body { font-family: 'JetBrains Mono', monospace; background: #0e0f12; color: #dde1e7; padding: 24px; }
+    h1 { color: #f4b860; font-family: serif; font-weight: 400; }
+    .suite { border: 1px solid #2a2d34; border-radius: 4px; padding: 12px 16px; margin: 12px 0; }
+    .suite h2 { color: #f4b860; font-size: 14px; margin: 0 0 8px; }
+    .tc { padding: 4px 8px; font-size: 12px; border-bottom: 1px dotted #2a2d34; }
+    .tc:last-child { border: none; }
+    .tc.pass { color: #7cb972; }
+    .tc.fail { color: #e08656; }
+    .tc.fail .msg { display: block; color: #dde1e7; margin-top: 4px; white-space: pre-wrap; }
+    .summary { margin-top: 16px; padding: 12px 16px; border: 2px solid; border-radius: 4px; font-weight: 700; }
+    .summary.ok { border-color: #7cb972; color: #7cb972; }
+    .summary.bad { border-color: #e08656; color: #e08656; }
+  </style>
+</head>
+<body>
+  <h1>Oculus v0.2 Tests</h1>
+  <div id="output"></div>
+
+  <!-- TensorFlow.js (required by classifier tests) -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+
+  <!-- Subject-under-test modules -->
+  <script src="../js/config.js"></script>
+  <script src="../js/features.js"></script>
+  <script src="../js/classifier.js"></script>
+  <script src="../js/gaze.js"></script>
+
+  <!-- Fixtures -->
+  <script src="fixtures/generate_synthetic.js"></script>
+
+  <!-- Minimal test harness -->
+  <script>
+    window.Test = {
+      currentSuite: null,
+      results: [],
+      outputEl: null,
+
+      init() {
+        this.outputEl = document.getElementById('output');
+      },
+
+      suite(name, fn) {
+        const suiteEl = document.createElement('div');
+        suiteEl.className = 'suite';
+        const header = document.createElement('h2');
+        header.textContent = name;
+        suiteEl.appendChild(header);
+        this.outputEl.appendChild(suiteEl);
+        this.currentSuite = { name, el: suiteEl };
+        // Return the promise so chained awaits work; tests are async.
+        return Promise.resolve(fn()).finally(() => {
+          this.currentSuite = null;
+        });
+      },
+
+      async test(name, fn) {
+        const tcEl = document.createElement('div');
+        tcEl.className = 'tc';
+        tcEl.textContent = `… ${name}`;
+        this.currentSuite.el.appendChild(tcEl);
+        try {
+          await fn();
+          tcEl.className = 'tc pass';
+          tcEl.textContent = `✓ ${name}`;
+          this.results.push({ name, ok: true });
+        } catch (err) {
+          tcEl.className = 'tc fail';
+          tcEl.innerHTML = `✗ ${name}<span class="msg">${err.stack || err.message || err}</span>`;
+          this.results.push({ name, ok: false, err });
+        }
+      },
+
+      assert(cond, msg) {
+        if (!cond) throw new Error('assertion failed: ' + (msg || ''));
+      },
+      assertClose(actual, expected, tol, msg) {
+        if (Math.abs(actual - expected) > tol) {
+          throw new Error(`${msg || 'not close'}: expected ${expected} ± ${tol}, got ${actual}`);
+        }
+      },
+      assertEqual(a, b, msg) {
+        if (a !== b) throw new Error(`${msg || 'not equal'}: ${a} !== ${b}`);
+      },
+
+      summary() {
+        const pass = this.results.filter(r => r.ok).length;
+        const fail = this.results.length - pass;
+        const el = document.createElement('div');
+        el.className = 'summary ' + (fail === 0 ? 'ok' : 'bad');
+        el.textContent = `${pass} / ${this.results.length} passing` + (fail ? ` — ${fail} failed` : '');
+        this.outputEl.appendChild(el);
+        console.log('Oculus v0.2 tests:', pass, '/', this.results.length);
+      },
+    };
+  </script>
+
+  <!-- Test suites -->
+  <script src="unit/test_features.js"></script>
+  <script src="unit/test_classifier.js"></script>
+  <script src="unit/test_gaze_pipeline.js"></script>
+
+  <script>
+    (async () => {
+      Test.init();
+      await window.runFeatureTests();
+      await window.runClassifierTests();
+      await window.runPipelineTests();
+      Test.summary();
+    })();
+  </script>
+</body>
+</html>
