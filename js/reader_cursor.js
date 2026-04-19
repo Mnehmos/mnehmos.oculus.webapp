@@ -47,6 +47,13 @@ window.ReaderCursor = {
   // Per-word dwell accounting for the session — exported alongside
   // per-brick stats so authors can see which words drew the most attention.
   wordDwell: new Map(),   // key: `${brickId}::${wordIndex}` → ms
+  wordVisits: new Map(),  // key: `${brickId}::${wordIndex}` → visit count
+
+  // Sequential log of word transitions (LLM-consumable reading trace).
+  // Each entry: { t, brickId, wordIndex, wordText, dwellMs, source }
+  // Capped at 2000 entries to bound export size on long sessions.
+  transitionLog: [],
+  MAX_TRANSITIONS: 2000,
 
   config: {
     ACTIVE_DWELL_MS: 300,         // word dwell before we capture a sample
@@ -127,7 +134,7 @@ window.ReaderCursor = {
               && window.Controller) {
             window.Controller.maybeFireHint(bId);
           }
-        });
+        }, 'mouse');
       }
     }
 
@@ -148,11 +155,27 @@ window.ReaderCursor = {
     const brickEl = this.state.currentWord.closest('.brick');
     if (!brickEl) return;
     const brickId = brickEl.dataset.brickId;
-    // Use the word's ordinal position within the brick as its stable id
     const words = Array.from(brickEl.querySelectorAll('.word'));
     const idx = words.indexOf(this.state.currentWord);
     const key = `${brickId}::${idx}`;
     this.wordDwell.set(key, (this.wordDwell.get(key) || 0) + ms);
+    this.wordVisits.set(key, (this.wordVisits.get(key) || 0) + 1);
+
+    // Append to transition log for sequential reading-path reconstruction.
+    const t = window.Events && window.Events.state.sessionStart
+      ? (now - window.Events.state.sessionStart) / 1000
+      : 0;
+    this.transitionLog.push({
+      t: Number(t.toFixed(2)),
+      brickId,
+      wordIndex: idx,
+      wordText: this.state.currentWord.textContent,
+      dwellMs: Math.round(ms),
+      source: 'mouse',
+    });
+    if (this.transitionLog.length > this.MAX_TRANSITIONS) {
+      this.transitionLog.shift();
+    }
   },
 
   _captureSample(now) {
@@ -209,19 +232,40 @@ window.ReaderCursor = {
     this.state.active = false;
     this.sampleQueue = [];
     this.wordDwell.clear();
+    this.wordVisits.clear();
+    this.transitionLog = [];
   },
 
   /**
-   * Export-friendly snapshot for ExportSession.
+   * Export-friendly snapshot for ExportSession. Attaches the word text
+   * to each dwell entry so downstream LLM reasoning doesn't need to
+   * cross-reference lesson JSON.
    */
   exportStats() {
+    const wordDwellEntries = Array.from(this.wordDwell.entries()).map(([key, ms]) => {
+      const [brickId, idxStr] = key.split('::');
+      const idx = parseInt(idxStr, 10);
+      const brickEl = document.querySelector(`.brick[data-brick-id="${brickId}"]`);
+      let wordText = null;
+      if (brickEl) {
+        const words = brickEl.querySelectorAll('.word');
+        if (words[idx]) wordText = words[idx].textContent;
+      }
+      return {
+        brickId,
+        wordIndex: idx,
+        wordText,
+        dwellMs: Math.round(ms),
+        visits: this.wordVisits.get(key) || 0,
+      };
+    });
+
     return {
       samplesCollected: this.sampleQueue.length,
       wordsRead: this.wordDwell.size,
-      wordDwell: Array.from(this.wordDwell.entries()).map(([key, ms]) => {
-        const [brickId, idx] = key.split('::');
-        return { brickId, wordIndex: parseInt(idx, 10), dwellMs: Math.round(ms) };
-      }),
+      wordDwell: wordDwellEntries,
+      // Sequential reading trace — LLM can see actual path, re-reads, pauses
+      transitionLog: this.transitionLog.slice(),
     };
   },
 };

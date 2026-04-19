@@ -65,8 +65,13 @@ const Events = {
    * via the provided callback when transitions occur.
    *
    * Callback signature: onEvent(eventType, brickId, detail)
+   *
+   * `source` tags every log entry with whether it came from mouse ground
+   * truth or gaze prediction — downstream LLM reasoning can weight them.
+   * Defaults to 'gaze' for back-compat.
    */
-  processBrick(newBrickId, onEvent) {
+  processBrick(newBrickId, onEvent, source) {
+    source = source || 'gaze';
     const cfg = window.OCULUS_CONFIG;
     const now = performance.now();
     const prevBrickId = this.state.currentBrick;
@@ -92,7 +97,7 @@ const Events = {
             this.state.visited.add(prevBrickId);
             prev.visits++;
             this._log('first_read', prevBrickId,
-              `type=${prev.type}, dwell=${Math.round(dwell)}ms`);
+              `type=${prev.type}, dwell=${Math.round(dwell)}ms`, source);
             onEvent && onEvent('first_read', prevBrickId, prev);
 
           } else if (prev._pendingEntryIsRegression) {
@@ -104,7 +109,7 @@ const Events = {
               prev.regressions++;
               prev.el.classList.add('regressed');
               this._log('regression', prevBrickId,
-                `visit #${prev.visits}, dwell=${Math.round(dwell)}ms`);
+                `visit #${prev.visits}, dwell=${Math.round(dwell)}ms`, source);
               onEvent && onEvent('regression', prevBrickId, prev);
               this.state.lastRegressionAt = now;
             } else {
@@ -122,7 +127,7 @@ const Events = {
             prev.stalls++;
             prev.el.classList.add('stalled');
             this._log('stall', prevBrickId,
-              `dwell ${Math.round(dwell)}ms (expected ~${prev.expectedDwell}ms)`);
+              `dwell ${Math.round(dwell)}ms (expected ~${prev.expectedDwell}ms)`, source);
             onEvent && onEvent('stall', prevBrickId, prev);
           }
         }
@@ -167,16 +172,22 @@ const Events = {
     this.state.gazeSamples++;
   },
 
-  _log(type, brickId, detail) {
+  _log(type, brickId, detail, source) {
     const t = ((performance.now() - this.state.sessionStart) / 1000).toFixed(1);
-    this.state.events.push({ t: parseFloat(t), type, brickId, detail });
+    this.state.events.push({
+      t: parseFloat(t),
+      type,
+      brickId,
+      detail,
+      source: source || 'system',
+    });
   },
 
   /**
    * Manually log a non-brick event (e.g. hint fill, calibration end).
    */
-  logMeta(type, brickId, detail) {
-    this._log(type, brickId || 'meta', detail);
+  logMeta(type, brickId, detail, source) {
+    this._log(type, brickId || 'meta', detail, source || 'system');
   },
 };
 

@@ -164,7 +164,7 @@ const App = {
           if (eventType === 'stall' || eventType === 'regression') {
             Controller.maybeFireHint(bId);
           }
-        });
+        }, 'gaze');
       }
 
       this.state.rafHandle = requestAnimationFrame(frame);
