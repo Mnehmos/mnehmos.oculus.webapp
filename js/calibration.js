@@ -218,7 +218,7 @@ window.Calibration = {
     const preview = document.getElementById('cal-persistent-preview');
     if (preview) preview.classList.add('hidden');
 
-    return { ok: true, accuracy };
+    return { ok: true, accuracy: primaryScore, headScores };
   },
 
   // ============================================================
