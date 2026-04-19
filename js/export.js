@@ -6,15 +6,19 @@
  * per-brick dwell, visits, regressions, stalls; the full typed event log;
  * hint-fire record.
  *
- * Schema version is included so future consumers can evolve without breaking
- * old exports.
+ * v0.2: adds classifier metadata (architecture, training summary, validation
+ * accuracy) so downstream analysis can reason about the quality of the
+ * classifier that produced the gaze stream. Optionally includes a
+ * per-frame confidence stream when EXPORT_CONFIDENCE_STREAM is true
+ * (off by default — it balloons file size).
  */
 
 const ExportSession = {
 
-  schemaVersion: 'oculus/v0.1',
+  schemaVersion: 'oculus/v0.2',
 
   toJSON(lessonId) {
+    const cfg = window.OCULUS_CONFIG;
     const now = performance.now();
     return {
       schema: this.schemaVersion,
@@ -22,6 +26,9 @@ const ExportSession = {
       exportedAt: new Date().toISOString(),
       durationMs: Events.state.sessionStart ? now - Events.state.sessionStart : 0,
       gazeSamples: Events.state.gazeSamples,
+      gazeArchitecture: 'classifier_direct_v0.2',
+      classifier: window.Classifier ? window.Classifier.exportMetadata() : null,
+      featureNormalization: window.Features ? window.Features.exportNormalization() : null,
       bricks: Object.fromEntries(
         Object.entries(Events.state.bricks).map(([id, b]) => [id, {
           type: b.type,
@@ -34,6 +41,9 @@ const ExportSession = {
       ),
       events: Events.state.events,
       hintsFired: Controller.state.hintsFired,
+      confidenceStream: cfg.EXPORT_CONFIDENCE_STREAM
+        ? (window.Gaze && window.Gaze._confidenceStream) || []
+        : null,
     };
   },
 
