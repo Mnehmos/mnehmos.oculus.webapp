@@ -52,8 +52,42 @@ const Telemetry = {
     this._set('visited', `${visitedContent.length} / ${contentBrickIds.length}`);
     this._set('hints', Controller.state.hintsFired);
 
+    // --- v0.2: classifier confidence + head pose ---
+    this._renderGazeDiagnostics();
+
     this._updateHeatmap(contentBrickIds, now);
     this._syncEventLog();
+  },
+
+  _renderGazeDiagnostics() {
+    const cfg = window.OCULUS_CONFIG;
+    const gp = window.Gaze && window.Gaze.lastPrediction;
+    if (!gp) return;
+
+    // confidence: mark accent if above threshold
+    const confEl = this.els.confidence;
+    if (confEl) {
+      if (!gp.faceDetected) {
+        confEl.textContent = 'no face';
+        confEl.classList.remove('accent');
+      } else {
+        confEl.textContent = gp.confidence.toFixed(2);
+        confEl.classList.toggle('accent', gp.confidence >= cfg.CONFIDENCE_THRESHOLD);
+      }
+    }
+
+    // head pose: yaw/pitch in degrees
+    const hpEl = this.els.headPose;
+    if (hpEl) {
+      if (!gp.faceDetected) {
+        hpEl.textContent = '—';
+      } else {
+        const rad2deg = 180 / Math.PI;
+        const yawDeg = (gp.headPose.yaw * rad2deg).toFixed(1);
+        const pitchDeg = (gp.headPose.pitch * rad2deg).toFixed(1);
+        hpEl.textContent = `y${yawDeg}° p${pitchDeg}°`;
+      }
+    }
   },
 
   _set(key, value) {
