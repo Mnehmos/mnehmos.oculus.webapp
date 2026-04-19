@@ -534,31 +534,34 @@
   transition: opacity 0.3s, box-shadow 0.3s;
 }
 
-/* Pulsing amber dot pinned to the center of the active calibration brick */
+/* Pulsing amber dot pinned to the center of the active calibration brick.
+   position: fixed so the dot stays at the brick's viewport position even
+   if the page scrolls mid-calibration. */
 .cal-brick-dot {
-  position: absolute;
-  width: 18px;
-  height: 18px;
+  position: fixed;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   background: var(--accent);
-  box-shadow: 0 0 16px var(--accent);
+  box-shadow: 0 0 20px var(--accent);
   transform: translate(-50%, -50%);
   cursor: pointer;
   animation: cal-pulse 1.2s ease-in-out infinite;
   z-index: 110;
+  pointer-events: auto;
 }
 @keyframes cal-pulse {
   0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
-  50%      { transform: translate(-50%, -50%) scale(1.35); opacity: 0.65; }
+  50%      { transform: translate(-50%, -50%) scale(1.4); opacity: 0.55; }
 }
 
 .cal-brick-progress {
-  position: absolute;
-  width: 56px;
-  height: 4px;
+  position: fixed;
+  width: 64px;
+  height: 5px;
   background: rgba(244, 184, 96, 0.2);
   border-radius: 2px;
-  transform: translate(-50%, 18px);
+  transform: translate(-50%, 22px);
   overflow: hidden;
   z-index: 110;
 }
@@ -568,3 +571,22 @@
   background: var(--accent);
   transition: width 0.1s linear;
 }
+
+/* Persistent webcam preview that survives phase transitions. Lives in the
+   top-right corner during calibration so the user can always see what the
+   camera sees. Mirrored for natural self-view. */
+#cal-persistent-preview {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  width: 200px;
+  height: 150px;
+  border: 1px solid var(--grid-line, #2a2d34);
+  border-radius: 4px;
+  background: #000;
+  object-fit: cover;
+  transform: scaleX(-1);
+  z-index: 105;
+  pointer-events: none;
+}
+#cal-persistent-preview.hidden { display: none; }

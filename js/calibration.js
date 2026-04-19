@@ -47,9 +47,13 @@ window.Calibration = {
       throw new Error(initResult.error);
     }
 
-    // Attach mirrored preview
-    const preview = introEl.querySelector('#cal-preview');
-    if (preview) window.FaceLandmarker.attachPreview(preview);
+    // Reveal the persistent preview and pipe the camera stream into it.
+    // This element lives outside #cal-intro so it survives phase transitions.
+    const persistentPreview = document.getElementById('cal-persistent-preview');
+    if (persistentPreview) {
+      persistentPreview.classList.remove('hidden');
+      window.FaceLandmarker.attachPreview(persistentPreview);
+    }
 
     const prewarmOk = await this._prewarmFaceDetection(introEl);
     if (!prewarmOk) {
@@ -135,6 +139,12 @@ window.Calibration = {
     }
 
     if (progressEl) progressEl.textContent = 'ready';
+
+    // Hide the persistent preview — calibration is done. (app.js can
+    // unhide it again if we decide to show a preview during reading.)
+    const preview = document.getElementById('cal-persistent-preview');
+    if (preview) preview.classList.add('hidden');
+
     return { ok: true, accuracy };
   },
 
@@ -146,11 +156,10 @@ window.Calibration = {
     if (phase === 'prewarm') {
       introEl.innerHTML = `
         <div class="cal-title">Look straight at the camera</div>
-        <video id="cal-preview" autoplay playsinline muted></video>
         <div id="cal-prewarm-status">detecting face…</div>
         <div class="cal-subtitle">
-          Sit comfortably. You'll see yourself mirrored above. Wait for
-          "face detected" before we move on.
+          Sit comfortably. The preview in the top-right shows what Oculus
+          sees. Wait for "face detected" before we move on.
         </div>
       `;
       if (progressEl) progressEl.textContent = 'phase 2 / 7 · detecting face';
@@ -298,10 +307,16 @@ window.Calibration = {
     brickEl.classList.remove('cal-dim');
     brickEl.classList.add('cal-active');
 
-    // Scroll the brick into view first, then place the dot at its center
-    brickEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    await new Promise(r => setTimeout(r, 300));
+    // Scroll the brick into view INSTANTLY (smooth scroll races the rect
+    // read; the dot gets placed mid-scroll and ends up in the wrong
+    // position). Wait two animation frames so layout fully settles, then
+    // measure.
+    brickEl.scrollIntoView({ behavior: 'instant', block: 'center' });
+    await new Promise(r => requestAnimationFrame(r));
+    await new Promise(r => requestAnimationFrame(r));
 
+    // The dot and progress bar are position: fixed, so they take viewport
+    // coordinates directly from getBoundingClientRect() — no scroll math.
     const rect = brickEl.getBoundingClientRect();
     const cx = rect.left + rect.width / 2;
     const cy = rect.top + rect.height / 2;

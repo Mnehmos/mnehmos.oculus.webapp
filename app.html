@@ -29,18 +29,25 @@
 
 <!-- ================= CALIBRATION OVERLAY ================= -->
 <div id="calibration-overlay">
+  <!--
+    Persistent webcam preview. Lives OUTSIDE #cal-intro so it survives the
+    innerHTML swaps that Calibration._renderPhase does between phases.
+    Hidden until the face landmarker is initialized.
+  -->
+  <video id="cal-persistent-preview" class="hidden" autoplay playsinline muted></video>
+
   <div id="cal-intro">
     <div class="cal-title">Calibrate Oculus</div>
     <div class="cal-subtitle">
-      You'll see nine dots appear in sequence. Click each one while looking
-      directly at it. Each click takes about 2 seconds. The overlay will fade
-      when calibration is complete.<br><br>
-      Sit steady. The calibration is only as good as your head position holds.
+      Oculus uses your webcam to learn where each paragraph is. You'll see
+      a preview of your face, then click an amber dot on each panel while
+      looking at it. Sit steady — the calibration only holds as long as
+      your head position does.
     </div>
     <button class="cal-start-btn" id="cal-start-btn">Begin Calibration</button>
   </div>
   <div id="cal-dots" style="display:none;"></div>
-  <div class="cal-progress" id="cal-progress" style="display:none;">0 / 9</div>
+  <div class="cal-progress" id="cal-progress" style="display:none;">0 / 7</div>
 </div>
 
 <!-- ================= GAZE CURSOR ================= -->
