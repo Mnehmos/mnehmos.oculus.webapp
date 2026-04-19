@@ -440,7 +440,11 @@
   pointer-events: none;
   z-index: 90;
   transform: translate(-50%, -50%);
-  transition: opacity 0.2s ease;
+  /* EMA smoothing already tames the prediction; a short CSS transition
+     on left/top rounds any remaining frame-to-frame steps so the cursor
+     glides instead of teleporting. Keep it short so cursor lag stays
+     sub-perceptible. */
+  transition: opacity 0.2s ease, left 80ms linear, top 80ms linear;
   mix-blend-mode: screen;
 }
 #gaze-cursor.hidden { opacity: 0; }

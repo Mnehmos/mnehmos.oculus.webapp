@@ -105,6 +105,10 @@ window.OCULUS_CONFIG = {
   // Regression mode only: blink gate — if average EAR < this, emit null
   // so blink frames don't generate garbage coord predictions.
   REGRESSION_EAR_GATE: 0.16,
+  // Exponential moving average alpha on predicted (x, y). Smoother =
+  // less jitter but more lag. 0.25 ≈ 4-frame half-life at 30Hz.
+  // 1.0 = no smoothing, 0.1 = very heavy smoothing.
+  REGRESSION_EMA_ALPHA: 0.25,
 
   // --- Calibration UX ---
   //   'grid'  — N×M dots at viewport-fixed positions on a blank overlay;
@@ -118,14 +122,15 @@ window.OCULUS_CONFIG = {
   CALIBRATION_METHOD: 'grid',
 
   // Grid parameters (used when CALIBRATION_METHOD = 'grid').
-  // 4x3 = 12 points — denser than a 3x3 = 9 grid. Extra coverage helps
-  // the regression model more than a moving dot does (an animated dot
-  // relies on the user's eyes perfectly tracking it, which they don't).
+  // 5x3 = 15 points. The extra column helps side-eye accuracy — iris
+  // features carry weaker signal at horizontal extremes (partial lid
+  // occlusion, head-turn coupling), so denser horizontal coverage
+  // matters more than vertical.
   GRID_ROWS: 3,
-  GRID_COLS: 4,
-  // Edge margin as fraction of viewport (how close to the screen edge
-  // the outermost dots get). 0.1 = 10% inset from each edge.
-  GRID_EDGE_MARGIN_PCT: 0.1,
+  GRID_COLS: 5,
+  // Edge margin as fraction of viewport. 0.07 = 7% inset, pushing the
+  // outermost dots closer to where real reading gaze actually goes.
+  GRID_EDGE_MARGIN_PCT: 0.07,
 
   // Per-dot sample collection (applies to both methods)
   SAMPLES_PER_BRICK: 50,

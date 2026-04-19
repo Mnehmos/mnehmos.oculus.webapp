@@ -18,6 +18,7 @@
 window.Gaze = {
 
   _recentPredictions: [],
+  _smoothedCoords: null,   // { x, y } — EMA-smoothed viewport coords
 
   lastPrediction: {
     brickId: null,             // smoothed primary-head id
@@ -37,6 +38,7 @@ window.Gaze = {
 
   reset() {
     this._recentPredictions = [];
+    this._smoothedCoords = null;
     this._lastTs = 0;
     this.lastPrediction = {
       brickId: null,
@@ -77,15 +79,38 @@ window.Gaze = {
       return this.lastPrediction.brickId;
     }
 
+    const cfg = window.OCULUS_CONFIG;
     const normalized = window.Features.normalize(features);
     const rawPerHead = window.Classifier.predict(normalized);
+
+    // EMA-smooth the primary regression head's coords before hit-test.
+    // Raw per-frame regression output jitters a lot (typical for a small
+    // MLP on noisy webcam features); an exponential moving average tames
+    // the visible cursor swing AND stabilizes which brick elementsFromPoint
+    // lands on, both of which Vario reported as "jittery as hell".
+    const primaryIdx = window.Classifier.primaryIdx || 0;
+    const primaryHead = window.Classifier.heads[primaryIdx];
+    if (primaryHead && primaryHead.mode === 'regression' && rawPerHead[primaryIdx]) {
+      const alpha = cfg.REGRESSION_EMA_ALPHA ?? 0.25;
+      const raw = rawPerHead[primaryIdx].raw;
+      if (!this._smoothedCoords) {
+        this._smoothedCoords = { x: raw.x, y: raw.y };
+      } else {
+        this._smoothedCoords.x = alpha * raw.x + (1 - alpha) * this._smoothedCoords.x;
+        this._smoothedCoords.y = alpha * raw.y + (1 - alpha) * this._smoothedCoords.y;
+      }
+      rawPerHead[primaryIdx].raw = {
+        x: this._smoothedCoords.x,
+        y: this._smoothedCoords.y,
+      };
+    }
+
     const resolved = window.Classifier.resolve(rawPerHead, features);
 
     this._pushPrediction(resolved.primary);
     const smoothed = this._majorityVote();
 
-    // Primary-head confidence + coords
-    const primaryHead = window.Classifier.heads[window.Classifier.primaryIdx || 0];
+    // Primary-head confidence + coords (reuse primaryHead from above)
     const primaryRaw = rawPerHead[window.Classifier.primaryIdx || 0]?.raw;
     let coords = null;
     let confidence = 0;
