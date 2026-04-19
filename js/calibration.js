@@ -129,7 +129,7 @@ window.Calibration = {
     window.Features.computeNormalization(allSamples);
     const normalizedSamples = allSamples.map(s => window.Features.normalize(s));
 
-    const brickIds = contentBricks.map(b => b.dataset.brickId);
+    const brickIds = contentBricksAll.map(b => b.dataset.brickId);
     brickIds.push('elsewhere');
 
     window.Classifier.build(brickIds);
