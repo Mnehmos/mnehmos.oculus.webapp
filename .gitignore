@@ -1,0 +1,24 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+
+# Optional node_modules (we don't use them, but just in case)
+node_modules/
+
+# Local session exports
+sessions/
+*.session.json
+
+# Approval tests scratch
+.approval_tests_temp/
+tmpclaude-*

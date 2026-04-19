@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Oculus — Reader</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Fraunces:opsz,wght@9..144,400;9..144,600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/app.css">
+
+  <!-- WebGazer.js — loaded from CDN, fetches on first run -->
+  <script src="https://webgazer.cs.brown.edu/webgazer.js" type="text/javascript"></script>
+</head>
+<body class="has-grid">
+
+<!-- ================= CALIBRATION OVERLAY ================= -->
+<div id="calibration-overlay">
+  <div id="cal-intro">
+    <div class="cal-title">Calibrate Oculus</div>
+    <div class="cal-subtitle">
+      You'll see nine dots appear in sequence. Click each one while looking
+      directly at it. Each click takes about 2 seconds. The overlay will fade
+      when calibration is complete.<br><br>
+      Sit steady. The calibration is only as good as your head position holds.
+    </div>
+    <button class="cal-start-btn" id="cal-start-btn">Begin Calibration</button>
+  </div>
+  <div id="cal-dots" style="display:none;"></div>
+  <div class="cal-progress" id="cal-progress" style="display:none;">0 / 9</div>
+</div>
+
+<!-- ================= GAZE CURSOR ================= -->
+<div id="gaze-cursor" class="hidden"></div>
+
+<!-- ================= MAIN LAYOUT ================= -->
+<div class="layout" id="main-layout" style="visibility: hidden;">
+
+  <!-- CONTENT COLUMN -->
+  <main class="content-col">
+    <header class="doc-header">
+      <div class="doc-kicker"></div>
+      <h1 class="doc-title"></h1>
+      <div class="doc-meta"></div>
+    </header>
+
+    <!-- Brick grid is populated at runtime from the lesson JSON. -->
+    <div class="brick-grid" id="brick-grid"></div>
+  </main>
+
+  <!-- TELEMETRY COLUMN -->
+  <aside class="telemetry-col">
+    <div class="tel-header">
+      <div class="tel-kicker">Session Telemetry</div>
+      <div class="tel-title">Gaze &amp; Events</div>
+    </div>
+
+    <div class="tel-section">
+      <div class="tel-section-title">Session</div>
+      <div class="tel-row"><span class="tel-label">elapsed</span>          <span class="tel-value" id="m-elapsed">0.0s</span></div>
+      <div class="tel-row"><span class="tel-label">gaze samples</span>     <span class="tel-value" id="m-samples">0</span></div>
+      <div class="tel-row"><span class="tel-label">current brick</span>    <span class="tel-value accent" id="m-current">&mdash;</span></div>
+      <div class="tel-row"><span class="tel-label">dwell on current</span> <span class="tel-value" id="m-dwell">0.0s</span></div>
+      <div class="tel-row"><span class="tel-label">bricks visited</span>   <span class="tel-value" id="m-visited">0 / 0</span></div>
+      <div class="tel-row"><span class="tel-label">hints fired</span>      <span class="tel-value" id="m-hints">0</span></div>
+    </div>
+
+    <div class="tel-section">
+      <div class="tel-section-title">Brick Heatmap (dwell intensity)</div>
+      <div class="heatmap" id="heatmap"></div>
+    </div>
+
+    <div class="tel-section">
+      <div class="tel-section-title">Event Log</div>
+      <div class="event-log" id="event-log"></div>
+    </div>
+  </aside>
+</div>
+
+<!-- ================= FOOTER CONTROLS ================= -->
+<div class="footer-controls" id="footer-controls" style="display:none;">
+  <button class="ctrl-btn" id="btn-home">◂ HOME</button>
+  <button class="ctrl-btn" id="btn-recalibrate">RECALIBRATE</button>
+  <button class="ctrl-btn" id="btn-export">EXPORT SESSION</button>
+  <button class="ctrl-btn" id="btn-toggle-cursor">TOGGLE CURSOR</button>
+</div>
+
+<!-- ================= MODULES ================= -->
+<script src="js/config.js"></script>
+<script src="js/content.js"></script>
+<script src="js/calibration.js"></script>
+<script src="js/gaze.js"></script>
+<script src="js/events.js"></script>
+<script src="js/controller.js"></script>
+<script src="js/telemetry.js"></script>
+<script src="js/export.js"></script>
+<script src="js/app.js"></script>
+
+</body>
+</html>

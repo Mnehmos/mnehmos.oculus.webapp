@@ -1,0 +1,87 @@
+{
+  "id": "gravity",
+  "title": "Why Does a Heavier Object Fall at the Same Rate as a Lighter One?",
+  "kicker": "Physics · Concept 4 of 12",
+  "prerequisites": "Newton's Second Law",
+  "estimatedMinutes": 4,
+  "bricks": [
+    {
+      "id": "B01",
+      "type": "opening",
+      "span": "full",
+      "expectedDwellMs": 9000,
+      "html": "<p>Drop a bowling ball and a tennis ball from the same height in a vacuum. They hit the ground at the same time. This famously weirds people out. The bowling ball is heavier &mdash; shouldn't gravity pull it harder? It does. And yet they fall together. The resolution is beautiful, and it's sitting right in Newton's Second Law.</p>"
+    },
+    {
+      "id": "B02",
+      "type": "setup",
+      "span": "two-thirds",
+      "expectedDwellMs": 7000,
+      "heading": "The force IS bigger for the heavier object",
+      "html": "<p>Gravity pulls on every object with a force proportional to its mass. A bowling ball weighing 7 kilograms experiences about seven times the gravitational force of a 1-kilogram tennis ball. So yes &mdash; the force on the heavy one is larger.</p>"
+    },
+    {
+      "id": "H02",
+      "type": "hint",
+      "span": "third",
+      "hintFor": "B02",
+      "label": "Quick check",
+      "html": "<p>You might be wondering: \"If the force is bigger, why doesn't the heavy ball fall faster?\" That's the exact puzzle. Hold onto that question &mdash; the next brick resolves it.</p>"
+    },
+    {
+      "id": "B03",
+      "type": "equation",
+      "span": "two-thirds",
+      "expectedDwellMs": 8000,
+      "heading": "But the acceleration isn't about force alone",
+      "html": "<p>Newton's Second Law says:</p><div class='equation'>F = m &middot; a</div><p>Rearranging for acceleration:</p><div class='equation'>a = F / m</div><p>The force on a falling object IS its weight, which equals mass times gravitational acceleration:</p><div class='equation'>F<sub>gravity</sub> = m &middot; g</div>"
+    },
+    {
+      "id": "H03",
+      "type": "hint",
+      "span": "third",
+      "hintFor": "B03",
+      "label": "Notice the algebra move",
+      "html": "<p>The key step is substituting <em>F = m &middot; g</em> into <em>a = F / m</em>. When you do, the <em>m</em> on top and bottom cancel. The mass of the falling object never reaches the final answer for <em>a</em>.</p>"
+    },
+    {
+      "id": "B04",
+      "type": "reveal",
+      "span": "full",
+      "expectedDwellMs": 10000,
+      "heading": "Watch what happens when you put it together",
+      "html": "<p>Substitute the gravity force into <em>a = F / m</em>:</p><div class='equation'>a = (m &middot; g) / m = g</div><p>The mass <em>cancels</em>. The heavier object has more gravitational force pulling on it, but it also has more inertia resisting acceleration. These two effects scale together, exactly, and divide out. Every object falls with the same acceleration <em>g</em>, regardless of mass.</p>"
+    },
+    {
+      "id": "B05",
+      "type": "diagram",
+      "span": "half",
+      "expectedDwellMs": 6000,
+      "html": "<div class='diagram'><svg viewBox='0 0 300 160' width='100%' height='100%' style='padding: 12px;'><line x1='20' y1='20' x2='280' y2='20' stroke='#4a515c' stroke-width='1' stroke-dasharray='3,3'/><line x1='20' y1='140' x2='280' y2='140' stroke='#4a515c' stroke-width='1'/><circle cx='90' cy='80' r='20' fill='#f4b860' opacity='0.8'/><text x='90' y='115' text-anchor='middle' fill='#dde1e7' font-family='JetBrains Mono' font-size='10'>7 kg</text><circle cx='210' cy='80' r='10' fill='#f4b860' opacity='0.8'/><text x='210' y='115' text-anchor='middle' fill='#dde1e7' font-family='JetBrains Mono' font-size='10'>0.06 kg</text><text x='150' y='50' text-anchor='middle' fill='#f4b860' font-family='JetBrains Mono' font-size='9' letter-spacing='0.1em'>SAME a = g</text><line x1='90' y1='105' x2='90' y2='135' stroke='#f4b860' stroke-width='1.5' marker-end='url(#arr)'/><line x1='210' y1='95' x2='210' y2='135' stroke='#f4b860' stroke-width='1.5' marker-end='url(#arr)'/><defs><marker id='arr' markerWidth='6' markerHeight='6' refX='3' refY='3' orient='auto'><polygon points='0 0, 6 3, 0 6' fill='#f4b860'/></marker></defs></svg></div>"
+    },
+    {
+      "id": "B06",
+      "type": "aside",
+      "span": "half",
+      "expectedDwellMs": 8000,
+      "heading": "Why do feathers fall slower?",
+      "html": "<p>In air, they don't fall at the same rate. Air resistance depends on surface area and shape, not mass. A feather has lots of surface area per unit mass, so drag force is significant compared to its weight. Drop the feather in a vacuum chamber and it falls at <em>g</em>, same as a bowling ball.</p>"
+    },
+    {
+      "id": "B07",
+      "type": "synthesis",
+      "span": "full",
+      "expectedDwellMs": 8000,
+      "heading": "The deeper idea",
+      "html": "<p>What you've just seen is a glimpse of the <em>equivalence principle</em>: gravitational mass (how strongly gravity pulls on you) and inertial mass (how hard it is to accelerate you) are the same quantity. Einstein turned this observation into general relativity. Your bowling-ball-and-tennis-ball puzzle is connected, by a thread of cancellation, to the curvature of spacetime.</p>"
+    },
+    {
+      "id": "H07",
+      "type": "hint",
+      "span": "third",
+      "hintFor": "B07",
+      "label": "Why this matters",
+      "html": "<p>That gravitational mass and inertial mass are the same is <em>not</em> obvious &mdash; it's an experimental fact. Einstein's move was to say: if they're the same, maybe they're the same <em>thing</em>, and gravity isn't a force at all, but the geometry of spacetime. That's general relativity in one step.</p>"
+    }
+  ]
+}

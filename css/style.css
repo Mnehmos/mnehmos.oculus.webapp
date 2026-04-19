@@ -1,0 +1,60 @@
+/* ===========================================================================
+   OCULUS — shared theme
+   ===========================================================================
+   Dark research-instrument aesthetic. Warm amber accent, calm dim backgrounds,
+   JetBrains Mono for UI / Fraunces for display. Shared between landing and
+   reader; page-specific styles live in landing.css and app.css.
+   =========================================================================== */
+
+:root {
+  --bg: #0e0f12;
+  --bg-elevated: #17191e;
+  --bg-brick: #1c1f25;
+  --bg-brick-active: #242830;
+  --bg-brick-hint-empty: #15171c;
+  --fg: #dde1e7;
+  --fg-dim: #8a92a0;
+  --fg-faint: #4a515c;
+  --accent: #f4b860;       /* warm amber — the pulse of attention */
+  --accent-dim: #8a6636;
+  --ok: #7cb972;
+  --warn: #e08656;
+  --regress: #d0658c;
+  --grid-line: #222630;
+  --font-display: 'Fraunces', Georgia, serif;
+  --font-ui: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.55;
+  overflow-x: hidden;
+}
+
+/* Background grid — reinforces the "every position is a cell" idea.
+   Both landing and reader use this; landing fades it into the hero. */
+body.has-grid {
+  background-image:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: 32px 32px;
+  background-position: -1px -1px;
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+button { font-family: var(--font-ui); }
+
+::selection { background: var(--accent); color: #1a1109; }
+
+/* Scrollbar styling — subtle, doesn't fight the instrument aesthetic */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--grid-line); border-radius: 0; }
+::-webkit-scrollbar-thumb:hover { background: var(--fg-faint); }

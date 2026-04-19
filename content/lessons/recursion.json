@@ -1,0 +1,88 @@
+{
+  "id": "recursion",
+  "title": "Why Does Recursion Work Without Falling Forever?",
+  "kicker": "Computer Science · Concept 1 of 8",
+  "prerequisites": "Functions, function calls",
+  "estimatedMinutes": 5,
+  "bricks": [
+    {
+      "id": "B01",
+      "type": "opening",
+      "span": "full",
+      "expectedDwellMs": 10000,
+      "html": "<p>A function that calls itself sounds like it should explode. If <code>f</code> calls <code>f</code>, which calls <code>f</code>, which calls <code>f</code>&mdash; the thing never stops. And yet programmers write recursive code every day and it works. What keeps recursion from falling forever? The answer has two pieces, and once you see them, recursion stops feeling like a trick and starts feeling like the most natural thing in the world.</p>"
+    },
+    {
+      "id": "B02",
+      "type": "setup",
+      "span": "two-thirds",
+      "expectedDwellMs": 7000,
+      "heading": "A recursive function has two jobs",
+      "html": "<p>Every recursive function must answer two questions: <em>when am I done?</em> and <em>what's a smaller version of the problem I can pass along?</em> Without the first, the recursion never stops. Without the second, every call is the same size as the last and recursion is pointless.</p>"
+    },
+    {
+      "id": "H02",
+      "type": "hint",
+      "span": "third",
+      "hintFor": "B02",
+      "label": "The two rules",
+      "html": "<p><strong>Base case:</strong> when to stop. <strong>Recursive case:</strong> a smaller version of the problem. Miss either and recursion breaks.</p>"
+    },
+    {
+      "id": "B03",
+      "type": "equation",
+      "span": "two-thirds",
+      "expectedDwellMs": 9000,
+      "heading": "Factorial: the textbook example",
+      "html": "<div class='equation'>factorial(0) = 1<br>factorial(n) = n &times; factorial(n - 1)</div><p>The first line is the base case. It says: \"if you ever reach zero, stop and return 1.\" The second line is the recursive case. It says: \"otherwise, ask for the answer to a slightly smaller problem and multiply.\"</p>"
+    },
+    {
+      "id": "H03",
+      "type": "hint",
+      "span": "third",
+      "hintFor": "B03",
+      "label": "Trace it",
+      "html": "<p>factorial(3) = 3 &times; factorial(2) = 3 &times; 2 &times; factorial(1) = 3 &times; 2 &times; 1 &times; factorial(0) = 3 &times; 2 &times; 1 &times; 1 = 6. The recursion stops at factorial(0), and the answer unwinds back up.</p>"
+    },
+    {
+      "id": "B04",
+      "type": "reveal",
+      "span": "full",
+      "expectedDwellMs": 10000,
+      "heading": "The stack is what makes it work",
+      "html": "<p>Each call to a function gets its own little workspace on the <em>call stack</em>&mdash;its own copy of the arguments, its own local variables, its own position in the code. When <code>factorial(3)</code> calls <code>factorial(2)</code>, the outer call doesn't disappear. It's paused, waiting. The inner call finishes, returns its answer, and the outer call resumes with that answer in hand. The stack is how the language remembers what was happening before the recursive call.</p>"
+    },
+    {
+      "id": "B05",
+      "type": "aside",
+      "span": "half",
+      "expectedDwellMs": 8000,
+      "heading": "When recursion does fall forever",
+      "html": "<p>If you forget the base case, every call spawns another call, and the stack grows until the language runs out of memory and crashes. This is <em>stack overflow</em>. It's not a bug in recursion &mdash; it's the language correctly telling you that your recursion has no escape hatch.</p>"
+    },
+    {
+      "id": "B06",
+      "type": "aside",
+      "span": "half",
+      "expectedDwellMs": 8000,
+      "heading": "Why we use it",
+      "html": "<p>Some problems are naturally recursive. File systems are trees; walk them with recursion. Algebraic expressions are nested; parse them with recursion. Sorting a list? Sort the halves, merge them. When the structure of the problem is recursive, so is the shortest correct solution.</p>"
+    },
+    {
+      "id": "B07",
+      "type": "synthesis",
+      "span": "full",
+      "expectedDwellMs": 8000,
+      "heading": "The mental model",
+      "html": "<p>Stop trying to trace every call mentally. Instead, trust the recursion: assume it works for the smaller case, and just write the step that solves the bigger case from the smaller one. Then write the base case. The language's call stack handles the rest. This is the trick. Once you can do this, you can read any recursive code at a glance.</p>"
+    },
+    {
+      "id": "H07",
+      "type": "hint",
+      "span": "third",
+      "hintFor": "B07",
+      "label": "The faith move",
+      "html": "<p>\"Assume recursion works for the smaller case\" sounds like cheating. It's not. It's the same leap as <em>mathematical induction</em>: if it works for n-1 and you correctly handle the step from n-1 to n, it works for all n.</p>"
+    }
+  ]
+}

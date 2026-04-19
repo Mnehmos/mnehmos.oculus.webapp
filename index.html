@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Oculus — Gaze-Tracking Pedagogy</title>
+  <meta name="description" content="A research instrument that watches where you read and helps when you get stuck. Webcam-only. All processing is local.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Fraunces:opsz,wght@9..144,400;9..144,600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/landing.css">
+</head>
+<body class="has-grid">
+
+<div class="landing">
+
+  <!-- TOP BAR -->
+  <header class="topbar">
+    <div class="wordmark">Oculus</div>
+    <nav class="topbar-links">
+      <a href="https://github.com/Mnehmos/mnehmos.oculus.webapp" target="_blank">GitHub</a>
+      <a href="https://github.com/Mnehmos" target="_blank">Mnehmos</a>
+    </nav>
+  </header>
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="hero-kicker">Research Instrument · Beta</div>
+    <h1 class="hero-title">
+      A reader that watches where you read, and helps when you <em>get stuck</em>.
+    </h1>
+    <p class="hero-subtitle">
+      Oculus uses your webcam to track where your eyes move across a lesson.
+      When it sees you dwell, re-read, or stall, it offers a context-specific hint
+      in the moment you need it — not a moment before. All processing happens
+      locally in your browser. Nothing leaves your device.
+    </p>
+  </section>
+
+  <!-- EXPLAINER CARDS -->
+  <section class="cards">
+
+    <div class="card">
+      <div class="card-num">01</div>
+      <div class="card-icon">◉</div>
+      <div class="card-title">Webcam Only</div>
+      <div class="card-body">
+        A quick 9-point calibration teaches a regression model where your eyes are looking.
+        No dedicated hardware, no cloud, no API calls. Your webcam feed never leaves this tab.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-num">02</div>
+      <div class="card-icon">▦</div>
+      <div class="card-title">Content as Bricks</div>
+      <div class="card-body">
+        Lessons are broken into small bricks — paragraph-sized units.
+        Webcam gaze is accurate at that scale. The system knows which brick
+        you're in, for how long, and where you came from.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-num">03</div>
+      <div class="card-icon">↻</div>
+      <div class="card-title">Helps on Signal</div>
+      <div class="card-body">
+        When a stall or regression is detected, an adjacent hint slot fills with
+        help specific to that brick. No scripted interruptions. The system only
+        speaks when your reading pattern asks it to.
+      </div>
+    </div>
+
+  </section>
+
+  <!-- LESSON SELECTOR -->
+  <div class="selector-header">Choose a lesson</div>
+  <div class="lesson-list" id="lesson-list">
+    <!-- Populated by JS from Content.availableLessons -->
+  </div>
+
+  <!-- COMPAT WARNING -->
+  <div class="compat-warn" id="compat-warn">
+    Your browser may not support webcam access. Oculus works best in recent
+    Chrome, Firefox, Edge, or Safari, on a desktop or laptop with a webcam.
+    Mobile browsers and older desktops often won't work.
+  </div>
+
+  <!-- CONSENT + START -->
+  <div class="consent">
+    <strong>Camera permission.</strong> Oculus will ask for webcam access when you click Start.
+    The webcam is used only by the gaze-tracking library running in this tab.
+    <strong>No video, no images, and no gaze data leave your device.</strong>
+    Session results stay in memory until you export them, and closing the tab discards everything.
+  </div>
+
+  <div class="start-row">
+    <button class="start-btn" id="start-btn" disabled>Select a lesson to begin</button>
+    <div class="start-hint">Calibration takes about 45 seconds.</div>
+  </div>
+
+  <!-- FOOTER -->
+  <footer class="footer">
+    <div>Built by <a href="https://github.com/Mnehmos" target="_blank">Mnehmos</a> · The Mnemosyne Research Institute</div>
+    <div>v0.1 beta</div>
+  </footer>
+
+</div>
+
+<script src="js/config.js"></script>
+<script src="js/content.js"></script>
+<script>
+/* ---------------------------------------------------------------------------
+   Landing-page wire-up.
+   Populates lesson selector from Content.availableLessons. On click, sets
+   selected class + enables start button. Start launches app.html with
+   ?lesson=... as query param.
+--------------------------------------------------------------------------- */
+
+(function () {
+  const listEl = document.getElementById('lesson-list');
+  const startBtn = document.getElementById('start-btn');
+  let selectedLessonId = null;
+
+  // Render lesson list
+  for (const lesson of Content.availableLessons) {
+    const el = document.createElement('button');
+    el.type = 'button';
+    el.className = 'lesson-option';
+    el.dataset.lessonId = lesson.id;
+    el.innerHTML = `
+      <div class="lesson-subject">${lesson.subject}</div>
+      <div class="lesson-title">${lesson.title}</div>
+    `;
+    el.addEventListener('click', () => {
+      document.querySelectorAll('.lesson-option').forEach(e => e.classList.remove('selected'));
+      el.classList.add('selected');
+      selectedLessonId = lesson.id;
+      startBtn.disabled = false;
+      startBtn.textContent = 'Begin Calibration';
+    });
+    listEl.appendChild(el);
+  }
+
+  // Start button handoff
+  startBtn.addEventListener('click', () => {
+    if (!selectedLessonId) return;
+    window.location.href = `app.html?lesson=${encodeURIComponent(selectedLessonId)}`;
+  });
+
+  // Basic browser-capability check
+  const hasGetUserMedia = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  if (!hasGetUserMedia) {
+    document.getElementById('compat-warn').classList.add('visible');
+  }
+})();
+</script>
+</body>
+</html>
