@@ -91,9 +91,21 @@ window.OCULUS_CONFIG = {
 
   FEATURE_VECTOR_DIM: 24,
   CLASSIFIER_HIDDEN_UNITS: 16,
-  CLASSIFIER_EPOCHS: 100,
+  CLASSIFIER_EPOCHS: 50,
   CLASSIFIER_BATCH_SIZE: 16,
   CLASSIFIER_LEARNING_RATE: 0.01,
+
+  // Calibration dot motion:
+  //  - Dwell center for FOLLOW_HOLD_MS (user locks gaze)
+  //  - Circle the brick at FOLLOW_RADIUS_RATIO of min(width,height) for
+  //    FOLLOW_SWEEP_MS (user's gaze follows → gradient signal for
+  //    regression and head-pose variance for both heads)
+  //  - Return to center for FOLLOW_RETURN_MS
+  // The three phases fit inside SAMPLE_COLLECTION_DURATION_MS.
+  FOLLOW_HOLD_MS: 300,
+  FOLLOW_SWEEP_MS: 1000,
+  FOLLOW_RETURN_MS: 200,
+  FOLLOW_RADIUS_RATIO: 0.35,
   // Classification mode only: if argmax probability < threshold, emit null.
   CONFIDENCE_THRESHOLD: 0.55,
   // Regression mode only: blink gate — if average EAR < this, emit null
@@ -105,7 +117,7 @@ window.OCULUS_CONFIG = {
   SAMPLES_PER_BRICK: 50,
   SAMPLE_COLLECTION_DURATION_MS: 1500,
   // Face-detection prewarm: show the preview, wait for a stable face
-  PREWARM_FACE_DETECTION_MS: 3000,
+  PREWARM_FACE_DETECTION_MS: 1500,
   PREWARM_MAX_WAIT_MS: 15000,
   // Count samples as "stable" when EAR > open-eye threshold for this long
   EAR_OPEN_THRESHOLD: 0.18,

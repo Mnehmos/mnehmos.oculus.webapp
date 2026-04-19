@@ -443,31 +443,71 @@ window.Calibration = {
       dot.addEventListener('click', onClick);
     });
 
-    // Re-measure AFTER the click (user may have scrolled slightly).
+    // Re-measure AFTER the click. The dot will animate within the brick
+    // over the collection window — user's eyes follow — so the regression
+    // model gets a gradient signal ("as iris moves right, target x moves
+    // right") rather than N point-targets. Classification label stays
+    // the brick id throughout.
     const rectNow = brickEl.getBoundingClientRect();
-    const targetPxX = rectNow.left + rectNow.width / 2;
-    const targetPxY = rectNow.top  + rectNow.height / 2;
-    const targetNormX = targetPxX / window.innerWidth;
-    const targetNormY = targetPxY / window.innerHeight;
+    const cxView = rectNow.left + rectNow.width / 2;
+    const cyView = rectNow.top  + rectNow.height / 2;
+    const radius = Math.min(rectNow.width, rectNow.height) * cfg.FOLLOW_RADIUS_RATIO;
+
+    const holdMs   = cfg.FOLLOW_HOLD_MS;
+    const sweepMs  = cfg.FOLLOW_SWEEP_MS;
+    const returnMs = cfg.FOLLOW_RETURN_MS;
+    const totalMs = holdMs + sweepMs + returnMs;
 
     const start = performance.now();
     const bar = progress.querySelector('.bar');
     let lastTs = 0;
 
-    while (performance.now() - start < cfg.SAMPLE_COLLECTION_DURATION_MS) {
+    while (performance.now() - start < totalMs) {
       await new Promise(r => requestAnimationFrame(r));
+      const elapsed = performance.now() - start;
+
+      // Compute dot position for this frame
+      let dotPxX = cxView, dotPxY = cyView;
+      if (elapsed < holdMs) {
+        // Hold center
+      } else if (elapsed < holdMs + sweepMs) {
+        // Circular sweep: one full revolution over sweepMs
+        const t = (elapsed - holdMs) / sweepMs;
+        const angle = t * 2 * Math.PI;
+        dotPxX = cxView + radius * Math.cos(angle);
+        dotPxY = cyView + radius * Math.sin(angle);
+      } else {
+        // Return: lerp from circle-end (which is back at right, x=cxView+radius, y=cyView)
+        // toward center. Start angle of sweep was 0 so end of sweep is same as start.
+        // If sweep is one full revolution, end position = (cxView+radius, cyView).
+        // Return to center over returnMs.
+        const t = (elapsed - holdMs - sweepMs) / returnMs;
+        dotPxX = (cxView + radius) * (1 - t) + cxView * t;
+        dotPxY = cyView;
+      }
+      dot.style.left = dotPxX + 'px';
+      dot.style.top  = dotPxY + 'px';
+      progress.style.left = dotPxX + 'px';
+      progress.style.top  = dotPxY + 'px';
+
       const ts = Math.max(lastTs + 1, Math.floor(performance.now()));
       lastTs = ts;
       const result = window.FaceLandmarker.detectFrame(ts);
       const features = window.Features.extract(result);
       if (features) {
         samples.push(features);
-        regLabels.push({ x: targetNormX, y: targetNormY });
+        // Regression target = current dot position (viewport-normalized)
+        regLabels.push({
+          x: dotPxX / window.innerWidth,
+          y: dotPxY / window.innerHeight,
+        });
+        // Classification label stays the brick id — dot is always inside
+        // this brick regardless of where it is within.
         clsLabels.push(brickId);
       }
-      const pct = Math.min(100, ((performance.now() - start) / cfg.SAMPLE_COLLECTION_DURATION_MS) * 100);
+      const pct = Math.min(100, (elapsed / totalMs) * 100);
       if (bar) bar.style.width = pct + '%';
-      if (samples.length >= cfg.SAMPLES_PER_BRICK * 1.5) break; // safety cap
+      if (samples.length >= cfg.SAMPLES_PER_BRICK * 2) break; // safety cap
     }
 
     // Tear down UI
