@@ -204,7 +204,7 @@ window.Calibration = {
       meanError: window.Classifier.heads[0].validationError,
     });
 
-    if (accuracy < cfg.VALIDATION_ACCURACY_THRESHOLD) {
+    if (primaryScore < cfg.VALIDATION_ACCURACY_THRESHOLD) {
       const accepted = await this._confirmLowAccuracy(introEl);
       if (!accepted) {
         throw new Error('User requested recalibration');
