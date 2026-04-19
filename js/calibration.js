@@ -498,10 +498,8 @@ window.Calibration = {
     const cyView = rectNow.top  + rectNow.height / 2;
     const radius = Math.min(rectNow.width, rectNow.height) * cfg.FOLLOW_RADIUS_RATIO;
 
-    const holdMs   = cfg.FOLLOW_HOLD_MS;
-    const sweepMs  = cfg.FOLLOW_SWEEP_MS;
-    const returnMs = cfg.FOLLOW_RETURN_MS;
-    const totalMs = holdMs + sweepMs + returnMs;
+    const totalMs = cfg.FOLLOW_DURATION_MS;
+    const revolutions = cfg.FOLLOW_REVOLUTIONS;
 
     const start = performance.now();
     const bar = progress.querySelector('.bar');
@@ -510,26 +508,17 @@ window.Calibration = {
     while (performance.now() - start < totalMs) {
       await new Promise(r => requestAnimationFrame(r));
       const elapsed = performance.now() - start;
+      const t = elapsed / totalMs;
 
-      // Compute dot position for this frame
-      let dotPxX = cxView, dotPxY = cyView;
-      if (elapsed < holdMs) {
-        // Hold center
-      } else if (elapsed < holdMs + sweepMs) {
-        // Circular sweep: one full revolution over sweepMs
-        const t = (elapsed - holdMs) / sweepMs;
-        const angle = t * 2 * Math.PI;
-        dotPxX = cxView + radius * Math.cos(angle);
-        dotPxY = cyView + radius * Math.sin(angle);
-      } else {
-        // Return: lerp from circle-end (which is back at right, x=cxView+radius, y=cyView)
-        // toward center. Start angle of sweep was 0 so end of sweep is same as start.
-        // If sweep is one full revolution, end position = (cxView+radius, cyView).
-        // Return to center over returnMs.
-        const t = (elapsed - holdMs - sweepMs) / returnMs;
-        dotPxX = (cxView + radius) * (1 - t) + cxView * t;
-        dotPxY = cyView;
-      }
+      // Smooth envelope: radius 0 at t=0 and t=1, max at t=0.5.
+      // sin²(πt) gives zero velocity at both endpoints — no jarring
+      // start/stop. The dot appears to "breathe" outward and back in.
+      const radiusRatio = Math.sin(Math.PI * t) ** 2;
+      const angle = t * revolutions * 2 * Math.PI;
+      const currentRadius = radius * radiusRatio;
+      const dotPxX = cxView + currentRadius * Math.cos(angle);
+      const dotPxY = cyView + currentRadius * Math.sin(angle);
+
       dot.style.left = dotPxX + 'px';
       dot.style.top  = dotPxY + 'px';
       progress.style.left = dotPxX + 'px';
@@ -541,18 +530,15 @@ window.Calibration = {
       const features = window.Features.extract(result);
       if (features) {
         samples.push(features);
-        // Regression target = current dot position (viewport-normalized)
         regLabels.push({
           x: dotPxX / window.innerWidth,
           y: dotPxY / window.innerHeight,
         });
-        // Classification label stays the brick id — dot is always inside
-        // this brick regardless of where it is within.
         clsLabels.push(brickId);
       }
-      const pct = Math.min(100, (elapsed / totalMs) * 100);
+      const pct = Math.min(100, t * 100);
       if (bar) bar.style.width = pct + '%';
-      if (samples.length >= cfg.SAMPLES_PER_BRICK * 2) break; // safety cap
+      if (samples.length >= cfg.SAMPLES_PER_BRICK * 2) break;
     }
 
     // Tear down UI
@@ -691,10 +677,8 @@ window.Calibration = {
       dot.addEventListener('click', onClick);
     });
 
-    const holdMs   = cfg.FOLLOW_HOLD_MS;
-    const sweepMs  = cfg.FOLLOW_SWEEP_MS;
-    const returnMs = cfg.FOLLOW_RETURN_MS;
-    const totalMs  = holdMs + sweepMs + returnMs;
+    const totalMs = cfg.FOLLOW_DURATION_MS;
+    const revolutions = cfg.FOLLOW_REVOLUTIONS;
 
     const start = performance.now();
     const bar = progress.querySelector('.bar');
@@ -703,20 +687,17 @@ window.Calibration = {
     while (performance.now() - start < totalMs) {
       await new Promise(r => requestAnimationFrame(r));
       const elapsed = performance.now() - start;
+      const t = elapsed / totalMs;
 
-      let dotPxX = cxView, dotPxY = cyView;
-      if (elapsed < holdMs) {
-        // Hold center
-      } else if (elapsed < holdMs + sweepMs) {
-        const t = (elapsed - holdMs) / sweepMs;
-        const angle = t * 2 * Math.PI;
-        dotPxX = cxView + radius * Math.cos(angle);
-        dotPxY = cyView + radius * Math.sin(angle);
-      } else {
-        const t = (elapsed - holdMs - sweepMs) / returnMs;
-        dotPxX = (cxView + radius) * (1 - t) + cxView * t;
-        dotPxY = cyView;
-      }
+      // Smooth envelope: sin²(πt) — zero velocity at both ends, no jarring
+      // start/stop. Dot eases outward, traces ~1.25 revolutions, eases
+      // back to center.
+      const radiusRatio = Math.sin(Math.PI * t) ** 2;
+      const angle = t * revolutions * 2 * Math.PI;
+      const currentRadius = radius * radiusRatio;
+      const dotPxX = cxView + currentRadius * Math.cos(angle);
+      const dotPxY = cyView + currentRadius * Math.sin(angle);
+
       dot.style.left = dotPxX + 'px';
       dot.style.top  = dotPxY + 'px';
       progress.style.left = dotPxX + 'px';
@@ -730,7 +711,7 @@ window.Calibration = {
         samples.push(features);
         regLabels.push({ x: dotPxX / vw, y: dotPxY / vh });
       }
-      const pct = Math.min(100, (elapsed / totalMs) * 100);
+      const pct = Math.min(100, t * 100);
       if (bar) bar.style.width = pct + '%';
       if (samples.length >= cfg.SAMPLES_PER_BRICK * 2) break;
     }

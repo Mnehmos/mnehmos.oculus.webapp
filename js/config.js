@@ -95,16 +95,16 @@ window.OCULUS_CONFIG = {
   CLASSIFIER_BATCH_SIZE: 16,
   CLASSIFIER_LEARNING_RATE: 0.01,
 
-  // Calibration dot motion:
-  //  - Dwell center for FOLLOW_HOLD_MS (user locks gaze)
-  //  - Circle the brick at FOLLOW_RADIUS_RATIO of min(width,height) for
-  //    FOLLOW_SWEEP_MS (user's gaze follows → gradient signal for
-  //    regression and head-pose variance for both heads)
-  //  - Return to center for FOLLOW_RETURN_MS
-  // The three phases fit inside SAMPLE_COLLECTION_DURATION_MS.
-  FOLLOW_HOLD_MS: 300,
-  FOLLOW_SWEEP_MS: 1000,
-  FOLLOW_RETURN_MS: 200,
+  // Calibration dot motion.
+  //
+  // The dot traces a smooth spiral: its radius follows a bell envelope
+  // sin²(πt), which is 0 at t=0 and t=1 and peaks at t=0.5, while its
+  // angular position advances continuously at FOLLOW_REVOLUTIONS per
+  // total duration. No hold → move → return phase transitions — the
+  // dot starts stationary-at-center (radius 0), eases outward, revolves,
+  // and eases back to center. User's eyes follow naturally.
+  FOLLOW_DURATION_MS: 2600,
+  FOLLOW_REVOLUTIONS: 1.25,
   FOLLOW_RADIUS_RATIO: 0.35,
   // Classification mode only: if argmax probability < threshold, emit null.
   CONFIDENCE_THRESHOLD: 0.55,

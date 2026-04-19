@@ -551,13 +551,18 @@
   box-shadow: 0 0 20px var(--accent);
   transform: translate(-50%, -50%);
   cursor: pointer;
-  animation: cal-pulse 1.2s ease-in-out infinite;
+  animation: cal-pulse 1.8s ease-in-out infinite;
   z-index: 110;
   pointer-events: auto;
+  /* Smooth out per-frame position updates. The JS animation sets left/top
+     on every rAF; a tiny transition rounds the step for any tearing from
+     decimal rounding and makes tracking feel less stuttery on lower-end
+     GPUs. Short enough that calibration sample timing isn't affected. */
+  transition: left 40ms linear, top 40ms linear;
 }
 @keyframes cal-pulse {
-  0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
-  50%      { transform: translate(-50%, -50%) scale(1.4); opacity: 0.55; }
+  0%, 100% { transform: translate(-50%, -50%) scale(1);    opacity: 1;    }
+  50%      { transform: translate(-50%, -50%) scale(1.25); opacity: 0.7;  }
 }
 
 .cal-brick-progress {
