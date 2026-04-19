@@ -13,6 +13,13 @@
  * The detector maintains per-brick state: visit count, total dwell, stalls,
  * regressions, last exit time, etc. The controller reads this state to decide
  * when to fire hints.
+ *
+ * v0.2 behavior: all "committed" events (first_read, regression, visit count,
+ * adding to the visited set) happen on EXIT from a brick, gated on
+ * DWELL_MS_MIN. This filters classifier flyover noise — when a noisy
+ * classifier briefly predicts a brick for a few frames, we don't count
+ * it as a real visit. A global regression cooldown also prevents a
+ * B03↔B04 oscillation from flooding the event log.
  */
 
 const Events = {
@@ -23,18 +30,19 @@ const Events = {
     currentBrick: null,
     currentBrickEnteredAt: null,
     visited: new Set(),
-    bricks: {},     // brickId -> { dwellTotal, visits, regressions, stalls, lastExitAt, ... }
-    events: [],     // full typed event log for session export
+    bricks: {},            // brickId -> { dwellTotal, visits, regressions, stalls, lastExitAt, ... }
+    events: [],            // full typed event log for session export
+    lastRegressionAt: 0,   // global cooldown timestamp for regression events
   },
 
   init(brickElements) {
-    const cfg = window.OCULUS_CONFIG;
     this.state.sessionStart = performance.now();
     this.state.bricks = {};
     this.state.events = [];
     this.state.visited = new Set();
     this.state.currentBrick = null;
     this.state.currentBrickEnteredAt = null;
+    this.state.lastRegressionAt = 0;
 
     for (const el of brickElements) {
       const id = el.dataset.brickId;
@@ -47,6 +55,7 @@ const Events = {
         regressions: 0,
         stalls: 0,
         lastExitAt: null,
+        _pendingEntryIsRegression: false, // set on entry, resolved on exit
       };
     }
   },
@@ -66,7 +75,7 @@ const Events = {
       return; // Same brick, nothing to do
     }
 
-    // --- Leaving a brick ---
+    // --- Leaving prev brick: commit events if dwell was substantial ---
     if (prevBrickId) {
       const prev = this.state.bricks[prevBrickId];
       if (prev) {
@@ -74,13 +83,51 @@ const Events = {
         prev.dwellTotal += dwell;
         prev.lastExitAt = now;
 
-        // Stall detection on exit
-        if (dwell > prev.expectedDwell * cfg.STALL_MULTIPLIER) {
-          prev.stalls++;
-          prev.el.classList.add('stalled');
-          this._log('stall', prevBrickId, `dwell ${Math.round(dwell)}ms (expected ~${prev.expectedDwell}ms)`);
-          onEvent && onEvent('stall', prevBrickId, prev);
+        // Gate on DWELL_MS_MIN: short "visits" are classifier noise,
+        // not real attention. Don't commit them as visits/events.
+        if (dwell >= cfg.DWELL_MS_MIN) {
+          const wasFirstVisit = !this.state.visited.has(prevBrickId);
+
+          if (wasFirstVisit) {
+            this.state.visited.add(prevBrickId);
+            prev.visits++;
+            this._log('first_read', prevBrickId,
+              `type=${prev.type}, dwell=${Math.round(dwell)}ms`);
+            onEvent && onEvent('first_read', prevBrickId, prev);
+
+          } else if (prev._pendingEntryIsRegression) {
+            // Global cooldown: even if a single brick cooled down per se,
+            // rapid-fire regressions across multiple bricks indicate the
+            // classifier is bouncing. Gate globally.
+            if (now - this.state.lastRegressionAt >= cfg.REGRESSION_COOLDOWN_MS) {
+              prev.visits++;
+              prev.regressions++;
+              prev.el.classList.add('regressed');
+              this._log('regression', prevBrickId,
+                `visit #${prev.visits}, dwell=${Math.round(dwell)}ms`);
+              onEvent && onEvent('regression', prevBrickId, prev);
+              this.state.lastRegressionAt = now;
+            } else {
+              // Bump visit count quietly but don't fire the event
+              prev.visits++;
+            }
+
+          } else {
+            // Non-regression non-first visit (within cooldown window) — count it
+            prev.visits++;
+          }
+
+          // Stall detection stays on exit (v0.1 behavior)
+          if (dwell > prev.expectedDwell * cfg.STALL_MULTIPLIER) {
+            prev.stalls++;
+            prev.el.classList.add('stalled');
+            this._log('stall', prevBrickId,
+              `dwell ${Math.round(dwell)}ms (expected ~${prev.expectedDwell}ms)`);
+            onEvent && onEvent('stall', prevBrickId, prev);
+          }
         }
+
+        prev._pendingEntryIsRegression = false;
       }
     }
 
@@ -92,24 +139,17 @@ const Events = {
         return;
       }
 
-      next.visits++;
-      const wasVisited = this.state.visited.has(newBrickId);
-      this.state.visited.add(newBrickId);
-
-      if (!wasVisited) {
-        this._log('first_read', newBrickId, `type=${next.type}`);
-        onEvent && onEvent('first_read', newBrickId, next);
-      } else if (
+      // Mark whether this entry, if it produces enough dwell, will count
+      // as a regression. Evaluated here because lastExitAt is frozen at
+      // time of previous exit.
+      next._pendingEntryIsRegression =
+        this.state.visited.has(newBrickId) &&
         next.lastExitAt !== null &&
-        now - next.lastExitAt > cfg.REGRESSION_COOLDOWN_MS
-      ) {
-        next.regressions++;
-        next.el.classList.add('regressed');
-        this._log('regression', newBrickId, `visit #${next.visits}`);
-        onEvent && onEvent('regression', newBrickId, next);
-      }
+        now - next.lastExitAt > cfg.REGRESSION_COOLDOWN_MS;
 
-      // Update gaze-active class (visual feedback)
+      // Update gaze-active class (visual feedback) — fine to do per-prediction
+      // so user sees the cursor snapping. This is distinct from the
+      // committed 'visited' set.
       document.querySelectorAll('.brick.gaze-active').forEach(el => el.classList.remove('gaze-active'));
       next.el.classList.add('gaze-active');
 

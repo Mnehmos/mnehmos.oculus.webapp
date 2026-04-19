@@ -23,6 +23,9 @@ const App = {
     cursorEl: null,
     tracking: false,
     rafHandle: null,
+    currentPage: 1,
+    totalPages: 1,
+    gridEl: null,
   },
 
   async start() {
@@ -46,6 +49,13 @@ const App = {
       title:  document.querySelector('.doc-title'),
       meta:   document.querySelector('.doc-meta'),
     });
+
+    this.state.gridEl = grid;
+    this.state.totalPages = Content.totalPages(lesson);
+    this.state.currentPage = 1;
+    // Show page 1 initially (hides the others)
+    Content.showPage(grid, 1);
+    this._updatePageIndicator();
 
     this._bindControls();
 
@@ -111,6 +121,7 @@ const App = {
     });
 
     this.state.tracking = true;
+    this._updatePageIndicator();
 
     // Main loop: MediaPipe → features → classifier → brick id → Events
     const frame = () => {
@@ -164,6 +175,41 @@ const App = {
         window.location.href = 'index.html';
       }
     });
+
+    const prevBtn = document.getElementById('btn-prev-page');
+    const nextBtn = document.getElementById('btn-next-page');
+    if (prevBtn) prevBtn.addEventListener('click', () => this._changePage(-1));
+    if (nextBtn) nextBtn.addEventListener('click', () => this._changePage(1));
+  },
+
+  _changePage(delta) {
+    const next = this.state.currentPage + delta;
+    if (next < 1 || next > this.state.totalPages) return;
+    this.state.currentPage = next;
+    Content.showPage(this.state.gridEl, next);
+    // Reset per-page gaze state so regressions don't fire the moment the
+    // page turns (classifier takes a frame or two to re-lock).
+    if (window.Gaze) window.Gaze.reset();
+    this._updatePageIndicator();
+    // Log the page change to the event stream so the session export
+    // captures when pages turned.
+    if (window.Events && window.Events.logMeta) {
+      window.Events.logMeta('page_change', 'meta', `page ${next}`);
+    }
+  },
+
+  _updatePageIndicator() {
+    const indicator = document.getElementById('page-indicator');
+    const prevBtn = document.getElementById('btn-prev-page');
+    const nextBtn = document.getElementById('btn-next-page');
+    if (indicator) {
+      indicator.textContent = `${this.state.currentPage} / ${this.state.totalPages}`;
+    }
+    // Only enable buttons when they'd do something AND tracking is active
+    // (buttons stay disabled during calibration)
+    const canNavigate = this.state.tracking && this.state.totalPages > 1;
+    if (prevBtn) prevBtn.disabled = !canNavigate || this.state.currentPage <= 1;
+    if (nextBtn) nextBtn.disabled = !canNavigate || this.state.currentPage >= this.state.totalPages;
   },
 
   _fail(msg) {

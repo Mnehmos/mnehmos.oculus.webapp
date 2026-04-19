@@ -534,6 +534,11 @@
   transition: opacity 0.3s, box-shadow 0.3s;
 }
 
+/* Pagination: hide bricks not on the currently-visible page. Using
+   display:none (not visibility/opacity) so the hidden pages don't
+   consume grid slots. */
+.brick.page-hidden { display: none; }
+
 /* Pulsing amber dot pinned to the center of the active calibration brick.
    position: fixed so the dot stays at the brick's viewport position even
    if the page scrolls mid-calibration. */

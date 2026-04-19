@@ -64,39 +64,58 @@ window.Calibration = {
     }
 
     // ---------- Phase 3: per-brick sample collection ----------
-    const contentBricks = Array.from(gridEl.querySelectorAll('.brick'))
-      .filter(el => el.dataset.brickType !== 'hint');
-
-    if (contentBricks.length === 0) {
-      throw new Error('No content bricks to calibrate against');
-    }
-
     // Reveal the main layout behind the overlay so bricks are visible
     // under the amber dots during Phase 3.
     const mainLayout = document.getElementById('main-layout');
     if (mainLayout) mainLayout.style.visibility = 'visible';
 
-    const allSamples = [];   // Array<Float32Array(24)>
-    const allLabels  = [];   // Array<string> (brick id or 'elsewhere')
+    // Iterate page by page. For each page: show only that page's bricks,
+    // dim them, then run per-brick sample collection for each content
+    // brick on that page. This avoids auto-scroll — every brick is fully
+    // visible when it's that brick's turn.
+    const allPages = Array.from(
+      new Set(Array.from(gridEl.querySelectorAll('.brick')).map(el => parseInt(el.dataset.page, 10)))
+    ).sort((a, b) => a - b);
 
-    // Dim all bricks before we start so the user sees the flow shift
-    for (const b of contentBricks) b.classList.add('cal-dim');
+    const contentBricksAll = Array.from(gridEl.querySelectorAll('.brick'))
+      .filter(el => el.dataset.brickType !== 'hint');
 
-    for (let i = 0; i < contentBricks.length; i++) {
-      const brickEl = contentBricks[i];
-      this._renderPhase(introEl, progressEl, 'brick', {
-        idx: i + 1,
-        total: contentBricks.length,
-        brickId: brickEl.dataset.brickId,
-      });
-
-      const { samples, labels } = await this._collectForBrick(brickEl);
-      allSamples.push(...samples);
-      allLabels.push(...labels);
+    if (contentBricksAll.length === 0) {
+      throw new Error('No content bricks to calibrate against');
     }
 
-    // Un-dim everything at phase end
-    for (const b of contentBricks) b.classList.remove('cal-dim', 'cal-active');
+    const allSamples = [];
+    const allLabels  = [];
+    let calibIdx = 0;
+
+    for (const page of allPages) {
+      window.Content.showPage(gridEl, page);
+      // Give the page a frame to lay out before measuring rects
+      await new Promise(r => requestAnimationFrame(r));
+
+      const pageContentBricks = Array.from(gridEl.querySelectorAll('.brick:not(.page-hidden)'))
+        .filter(el => el.dataset.brickType !== 'hint');
+      for (const b of pageContentBricks) b.classList.add('cal-dim');
+
+      for (const brickEl of pageContentBricks) {
+        calibIdx++;
+        this._renderPhase(introEl, progressEl, 'brick', {
+          idx: calibIdx,
+          total: contentBricksAll.length,
+          brickId: brickEl.dataset.brickId,
+          page,
+          totalPages: allPages.length,
+        });
+        const { samples, labels } = await this._collectForBrick(brickEl);
+        allSamples.push(...samples);
+        allLabels.push(...labels);
+      }
+
+      for (const b of pageContentBricks) b.classList.remove('cal-dim', 'cal-active');
+    }
+
+    // Finally, restore the first page as the reading starting point.
+    window.Content.showPage(gridEl, allPages[0]);
 
     // ---------- Phase 4: 'elsewhere' samples ----------
     this._renderPhase(introEl, progressEl, 'elsewhere', {});
@@ -173,8 +192,11 @@ window.Calibration = {
         </div>
       `;
       if (progressEl) {
+        const pagePart = detail.totalPages > 1
+          ? ` · page ${detail.page}/${detail.totalPages}`
+          : '';
         progressEl.textContent =
-          `phase 3 / 7 · brick ${detail.idx} of ${detail.total} (${detail.brickId})`;
+          `phase 3 / 7 · brick ${detail.idx} of ${detail.total} (${detail.brickId})${pagePart}`;
       }
       // Hide the overlay's background so the user can see the page content.
       // The amber dot and active brick are on top of the page; overlay
@@ -307,12 +329,11 @@ window.Calibration = {
     brickEl.classList.remove('cal-dim');
     brickEl.classList.add('cal-active');
 
-    // Scroll the brick into view INSTANTLY (smooth scroll races the rect
-    // read; the dot gets placed mid-scroll and ends up in the wrong
-    // position). Wait two animation frames so layout fully settles, then
-    // measure.
-    brickEl.scrollIntoView({ behavior: 'instant', block: 'center' });
-    await new Promise(r => requestAnimationFrame(r));
+    // Do NOT auto-scroll. Auto-scroll makes the user's eyes follow the
+    // content, which corrupts the calibration mapping. All bricks should
+    // fit in the viewport — we page-break at lesson authoring time
+    // rather than scrolling. Wait one frame so the .cal-active class
+    // has landed on the brick.
     await new Promise(r => requestAnimationFrame(r));
 
     // The dot and progress bar are position: fixed, so they take viewport

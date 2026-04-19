@@ -7,6 +7,7 @@
   "bricks": [
     {
       "id": "B01",
+      "page": 1,
       "type": "opening",
       "span": "full",
       "expectedDwellMs": 10000,
@@ -14,6 +15,7 @@
     },
     {
       "id": "B02",
+      "page": 1,
       "type": "setup",
       "span": "two-thirds",
       "expectedDwellMs": 7000,
@@ -22,6 +24,7 @@
     },
     {
       "id": "H02",
+      "page": 1,
       "type": "hint",
       "span": "third",
       "hintFor": "B02",
@@ -30,6 +33,7 @@
     },
     {
       "id": "B03",
+      "page": 2,
       "type": "equation",
       "span": "two-thirds",
       "expectedDwellMs": 9000,
@@ -38,6 +42,7 @@
     },
     {
       "id": "H03",
+      "page": 2,
       "type": "hint",
       "span": "third",
       "hintFor": "B03",
@@ -46,6 +51,7 @@
     },
     {
       "id": "B04",
+      "page": 2,
       "type": "reveal",
       "span": "full",
       "expectedDwellMs": 10000,
@@ -54,6 +60,7 @@
     },
     {
       "id": "B05",
+      "page": 3,
       "type": "aside",
       "span": "half",
       "expectedDwellMs": 8000,
@@ -62,6 +69,7 @@
     },
     {
       "id": "B06",
+      "page": 3,
       "type": "aside",
       "span": "half",
       "expectedDwellMs": 8000,
@@ -70,6 +78,7 @@
     },
     {
       "id": "B07",
+      "page": 3,
       "type": "synthesis",
       "span": "full",
       "expectedDwellMs": 8000,
@@ -78,6 +87,7 @@
     },
     {
       "id": "H07",
+      "page": 3,
       "type": "hint",
       "span": "third",
       "hintFor": "B07",

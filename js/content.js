@@ -45,6 +45,10 @@ const Content = {
       el.className = `brick span-${brick.span}`;
       el.dataset.brickId = brick.id;
       el.dataset.brickType = brick.type;
+      // Page field on bricks enables multi-page lessons without scroll.
+      // Bricks default to page 1 if unspecified (back-compat with any
+      // author-side JSON that hasn't opted in yet).
+      el.dataset.page = String(brick.page || 1);
 
       if (brick.type === 'hint') {
         el.classList.add('hint-slot');
@@ -70,6 +74,40 @@ const Content = {
 
       container.appendChild(el);
     }
+  },
+
+  /**
+   * Count how many distinct `page` values the lesson's bricks span.
+   * Lessons without any page field effectively have 1 page.
+   */
+  totalPages(lesson) {
+    const pages = new Set();
+    for (const brick of lesson.bricks) pages.add(brick.page || 1);
+    return pages.size;
+  },
+
+  /**
+   * Hide all bricks not on `pageNum`. Called both during calibration
+   * (to isolate one page at a time) and during reading (to navigate).
+   * Returns the array of currently-visible brick elements.
+   */
+  showPage(container, pageNum) {
+    const visible = [];
+    const all = container.querySelectorAll('.brick');
+    for (const el of all) {
+      const isOn = String(el.dataset.page) === String(pageNum);
+      el.classList.toggle('page-hidden', !isOn);
+      if (isOn) visible.push(el);
+    }
+    return visible;
+  },
+
+  /**
+   * Return the brick elements currently on the given page (regardless of
+   * whether that page is the currently-visible one).
+   */
+  bricksOnPage(container, pageNum) {
+    return Array.from(container.querySelectorAll(`.brick[data-page="${pageNum}"]`));
   },
 
   /**

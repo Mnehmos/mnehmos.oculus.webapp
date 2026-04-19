@@ -14,8 +14,8 @@ window.OCULUS_CONFIG = {
   // predictions and emits a brick id only if ≥ MIN_AGREE of them agree.
   // Bigger N = more stable but laggier.
   SAMPLE_SMOOTHING: 5,
-  PREDICTION_SMOOTHING_WINDOW: 5,
-  PREDICTION_SMOOTHING_MIN_AGREE: 3,
+  PREDICTION_SMOOTHING_WINDOW: 7,
+  PREDICTION_SMOOTHING_MIN_AGREE: 4,
 
   // --- Dwell / stall detection ---
   // Minimum ms in a brick before it counts as "visited" (filters flyover).
@@ -74,7 +74,7 @@ window.OCULUS_CONFIG = {
   CLASSIFIER_LEARNING_RATE: 0.01,
   // If argmax probability < threshold, emit null ("uncertain") instead of
   // a brick id. Prevents spurious transitions during saccades / blinks.
-  CONFIDENCE_THRESHOLD: 0.4,
+  CONFIDENCE_THRESHOLD: 0.55,
 
   // --- Calibration UX ---
   // Per-brick sample collection
