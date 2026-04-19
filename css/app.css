@@ -24,6 +24,34 @@
   pointer-events: none;
 }
 
+/* During per-brick phase, the overlay becomes a transparent click-passthrough
+   so the user can see the page content and click the amber dot directly.
+   The intro text box stays readable at the top. */
+#calibration-overlay.cal-passthrough {
+  background: transparent;
+  pointer-events: none;
+  justify-content: flex-start;
+  padding-top: 24px;
+}
+#calibration-overlay.cal-passthrough #cal-intro {
+  background: rgba(14, 15, 18, 0.85);
+  border: 1px solid var(--grid-line, #2a2d34);
+  border-radius: 6px;
+  padding: 16px 24px;
+  max-width: 620px;
+  pointer-events: auto;
+}
+#calibration-overlay.cal-passthrough .cal-subtitle {
+  margin-bottom: 0;
+}
+#calibration-overlay.cal-passthrough #cal-progress {
+  background: rgba(14, 15, 18, 0.85);
+  border: 1px solid var(--grid-line, #2a2d34);
+  padding: 4px 10px;
+  border-radius: 4px;
+  pointer-events: auto;
+}
+
 .cal-title {
   font-family: var(--font-display);
   font-size: 38px;

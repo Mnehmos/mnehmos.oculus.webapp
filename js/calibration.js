@@ -1,121 +1,422 @@
 /**
- * Calibration flow.
+ * Per-brick calibration (v0.2).
  *
- * Shows 9 dots in sequence. User clicks each while looking at it. Each click
- * feeds WebGazer several samples at the click location. After 9 clicks, the
- * regression model has enough data to estimate gaze from webcam input.
+ * Replaces the v0.1 9-point WebGazer calibration with a classifier-oriented
+ * flow: the user looks at each content brick in turn, clicks to confirm
+ * their gaze is steady, and Oculus records ~50 feature samples at that
+ * position labeled with that brick's id. Those samples train the MLP.
  *
- * Returns a promise that resolves when calibration is complete.
+ * Phases (handoff §7):
+ *   1. Intro               — reuses the existing #cal-intro DOM
+ *   2. Face-detect prewarm — show mirrored preview, wait for stable face
+ *   3. Per-brick samples   — for each content brick: fade others, pulse
+ *                            amber dot on brick center, collect on click
+ *   4. Elsewhere samples   — look away / close eyes
+ *   5. Train classifier
+ *   6. Validate — if accuracy < threshold, offer recalibrate
+ *   7. Resolve promise; caller removes overlay and starts the reader loop
  *
- * --- IMPORTANT: MediaPipe asset path ---
- * WebGazer internally uses MediaPipe Face Mesh for face landmark detection.
- * By default, WebGazer looks for MediaPipe's WASM and binary proto files at
- * `./mediapipe/face_mesh/` *relative to the page* — which 404s on any deployment
- * that doesn't vendor those files locally.
- *
- * The fix: set `webgazer.params.faceMeshSolutionPath` to the jsDelivr CDN
- * URL for @mediapipe/face_mesh BEFORE calling webgazer.begin(). The property
- * is exposed via `webgazer.params` which WebGazer assigns internally as
- * `_W.params = BP` (confirmed by inspecting the webgazer.js source).
- *
- * This avoids vendoring ~5MB of MediaPipe assets into the repo.
+ * Returns a promise that resolves with { ok, accuracy } or rejects on
+ * hard failure (camera denied, MediaPipe module failed, etc.).
  */
 
-const Calibration = {
-
-  // Pin to a specific version to avoid CDN-drift breakage.
-  MEDIAPIPE_FACE_MESH_CDN: 'https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619',
-
-  async run(webgazer, introEl, dotsEl, progressEl) {
-    const cfg = window.OCULUS_CONFIG;
-
-    // --- Redirect MediaPipe asset loading to the CDN ---
-    // This MUST happen before webgazer.begin() — the loader captures the
-    // solutionPath at FaceMesh construction time.
-    try {
-      if (webgazer && webgazer.params) {
-        webgazer.params.faceMeshSolutionPath = this.MEDIAPIPE_FACE_MESH_CDN;
-      }
-    } catch (e) {
-      // Non-fatal — if this fails WebGazer will fall back to relative paths
-      // and the user will see the MediaPipe 404s. But we shouldn't crash here.
-      console.warn('Could not set MediaPipe CDN path:', e);
-    }
-
-    try {
-      await webgazer
-        .setGazeListener(null)
-        .setRegression('ridge')
-        .begin();
-
-      // These visual-feedback calls are best-effort — if the WebGazer API
-      // changed, don't crash the whole calibration over them.
-      this._safeCall(webgazer, 'showVideoPreview', true);
-      this._safeCall(webgazer, 'showPredictionPoints', false);
-      this._safeCall(webgazer, 'showFaceOverlay', false);
-      this._safeCall(webgazer, 'showFaceFeedbackBox', false);
-    } catch (err) {
-      throw new Error('Camera unavailable: ' + (err.message || err));
-    }
-
-    introEl.style.display = 'none';
-    dotsEl.style.display = 'block';
-    progressEl.style.display = 'block';
-
-    const points = cfg.CALIBRATION_POINTS;
-    for (let i = 0; i < points.length; i++) {
-      const [xPct, yPct] = points[i];
-      const x = window.innerWidth * xPct;
-      const y = window.innerHeight * yPct;
-
-      await this._runOnePoint(webgazer, x, y, i, points.length, dotsEl, progressEl);
-    }
-  },
+window.Calibration = {
 
   /**
-   * Call a method on webgazer if it exists. Swallow errors. This protects
-   * against API drift between WebGazer versions — if a method we expect is
-   * missing or renamed, we degrade gracefully instead of crashing calibration.
+   * @param opts.introEl     the #cal-intro container (will be rewritten
+   *                         phase-by-phase)
+   * @param opts.dotsEl      the #cal-dots container (legacy; hidden in v0.2)
+   * @param opts.progressEl  the #cal-progress container (repurposed as
+   *                         phase label: "phase 2 / 7 · detecting face")
+   * @param opts.gridEl      the brick-grid, so we can overlay dots on bricks
    */
-  _safeCall(webgazer, methodName, ...args) {
-    try {
-      if (typeof webgazer[methodName] === 'function') {
-        webgazer[methodName](...args);
+  async run(opts) {
+    const cfg = window.OCULUS_CONFIG;
+    const { introEl, dotsEl, progressEl, gridEl } = opts;
+
+    // Hide legacy dot container — we overlay dots directly on bricks now.
+    if (dotsEl) dotsEl.style.display = 'none';
+    if (progressEl) progressEl.style.display = 'block';
+
+    // ---------- Phase 2: face-detect prewarm ----------
+    this._renderPhase(introEl, progressEl, 'prewarm', {});
+
+    const initResult = await window.FaceLandmarker.init();
+    if (!initResult.ok) {
+      this._renderPhase(introEl, progressEl, 'error', { message: initResult.error });
+      throw new Error(initResult.error);
+    }
+
+    // Attach mirrored preview
+    const preview = introEl.querySelector('#cal-preview');
+    if (preview) window.FaceLandmarker.attachPreview(preview);
+
+    const prewarmOk = await this._prewarmFaceDetection(introEl);
+    if (!prewarmOk) {
+      this._renderPhase(introEl, progressEl, 'error', {
+        message: 'Could not get a stable face read. Check lighting and sit so your face is centered in the preview.',
+      });
+      throw new Error('Face detection prewarm timed out');
+    }
+
+    // ---------- Phase 3: per-brick sample collection ----------
+    const contentBricks = Array.from(gridEl.querySelectorAll('.brick'))
+      .filter(el => el.dataset.brickType !== 'hint');
+
+    if (contentBricks.length === 0) {
+      throw new Error('No content bricks to calibrate against');
+    }
+
+    // Reveal the main layout behind the overlay so bricks are visible
+    // under the amber dots during Phase 3.
+    const mainLayout = document.getElementById('main-layout');
+    if (mainLayout) mainLayout.style.visibility = 'visible';
+
+    const allSamples = [];   // Array<Float32Array(24)>
+    const allLabels  = [];   // Array<string> (brick id or 'elsewhere')
+
+    // Dim all bricks before we start so the user sees the flow shift
+    for (const b of contentBricks) b.classList.add('cal-dim');
+
+    for (let i = 0; i < contentBricks.length; i++) {
+      const brickEl = contentBricks[i];
+      this._renderPhase(introEl, progressEl, 'brick', {
+        idx: i + 1,
+        total: contentBricks.length,
+        brickId: brickEl.dataset.brickId,
+      });
+
+      const { samples, labels } = await this._collectForBrick(brickEl);
+      allSamples.push(...samples);
+      allLabels.push(...labels);
+    }
+
+    // Un-dim everything at phase end
+    for (const b of contentBricks) b.classList.remove('cal-dim', 'cal-active');
+
+    // ---------- Phase 4: 'elsewhere' samples ----------
+    this._renderPhase(introEl, progressEl, 'elsewhere', {});
+    const elsewhere = await this._collectElsewhere();
+    allSamples.push(...elsewhere);
+    allLabels.push(...elsewhere.map(() => 'elsewhere'));
+
+    // ---------- Phase 5: train the classifier ----------
+    this._renderPhase(introEl, progressEl, 'training', {});
+
+    window.Features.computeNormalization(allSamples);
+    const normalizedSamples = allSamples.map(s => window.Features.normalize(s));
+
+    const brickIds = contentBricks.map(b => b.dataset.brickId);
+    brickIds.push('elsewhere');
+
+    window.Classifier.build(brickIds);
+    await window.Classifier.train(normalizedSamples, allLabels, (epoch, logs) => {
+      const lossEl = introEl.querySelector('#cal-train-loss');
+      if (lossEl && logs) {
+        lossEl.textContent = `epoch ${epoch + 1}/${cfg.CLASSIFIER_EPOCHS} · loss ${logs.loss.toFixed(3)}`;
       }
-    } catch (e) {
-      console.warn(`webgazer.${methodName} failed:`, e);
+    });
+
+    // ---------- Phase 6: validate ----------
+    // Use a held-out 20% of samples (sampled evenly) as a smoke test.
+    // tf.fit's val_acc is the more rigorous number; this just guards
+    // against a pathological constant-output model.
+    const accuracy = this._holdoutValidate(normalizedSamples, allLabels, 0.2);
+    this._renderPhase(introEl, progressEl, 'validation', {
+      accuracy: accuracy,
+      threshold: cfg.VALIDATION_ACCURACY_THRESHOLD,
+    });
+
+    if (accuracy < cfg.VALIDATION_ACCURACY_THRESHOLD) {
+      const accepted = await this._confirmLowAccuracy(introEl);
+      if (!accepted) {
+        throw new Error('User requested recalibration');
+      }
+    }
+
+    if (progressEl) progressEl.textContent = 'ready';
+    return { ok: true, accuracy };
+  },
+
+  // ============================================================
+  //   Phase renderers
+  // ============================================================
+
+  _renderPhase(introEl, progressEl, phase, detail) {
+    if (phase === 'prewarm') {
+      introEl.innerHTML = `
+        <div class="cal-title">Look straight at the camera</div>
+        <video id="cal-preview" autoplay playsinline muted></video>
+        <div id="cal-prewarm-status">detecting face…</div>
+        <div class="cal-subtitle">
+          Sit comfortably. You'll see yourself mirrored above. Wait for
+          "face detected" before we move on.
+        </div>
+      `;
+      if (progressEl) progressEl.textContent = 'phase 2 / 7 · detecting face';
+
+    } else if (phase === 'brick') {
+      introEl.innerHTML = `
+        <div class="cal-title">Look at the highlighted panel</div>
+        <div class="cal-subtitle">
+          When your gaze is steady on the glowing dot, click it. A short
+          sample is collected. Keep your head still between clicks.
+        </div>
+      `;
+      if (progressEl) {
+        progressEl.textContent =
+          `phase 3 / 7 · brick ${detail.idx} of ${detail.total} (${detail.brickId})`;
+      }
+      // Hide the overlay's background so the user can see the page content.
+      // The amber dot and active brick are on top of the page; overlay
+      // becomes a transparent click-passthrough for this phase.
+      const overlay = document.getElementById('calibration-overlay');
+      if (overlay) overlay.classList.add('cal-passthrough');
+
+    } else if (phase === 'elsewhere') {
+      // Restore overlay opacity
+      const overlay = document.getElementById('calibration-overlay');
+      if (overlay) overlay.classList.remove('cal-passthrough');
+
+      introEl.innerHTML = `
+        <div class="cal-title">Look away, or close your eyes</div>
+        <div class="cal-subtitle">
+          For the next few seconds, look somewhere off the page — a window,
+          the ceiling, or just close your eyes. This teaches Oculus what
+          "not reading" looks like.
+        </div>
+        <div class="cal-countdown" id="cal-elsewhere-countdown">3.0 s</div>
+      `;
+      if (progressEl) progressEl.textContent = 'phase 4 / 7 · elsewhere samples';
+
+    } else if (phase === 'training') {
+      introEl.innerHTML = `
+        <div class="cal-title">Training…</div>
+        <div class="cal-subtitle">
+          Oculus is learning your gaze-to-brick mapping. This takes a second.
+        </div>
+        <div class="cal-countdown" id="cal-train-loss">starting…</div>
+      `;
+      if (progressEl) progressEl.textContent = 'phase 5 / 7 · training classifier';
+
+    } else if (phase === 'validation') {
+      const pct = Math.round(detail.accuracy * 100);
+      const ok = detail.accuracy >= detail.threshold;
+      introEl.innerHTML = `
+        <div class="cal-title">${ok ? 'Ready.' : 'Calibration a bit shaky.'}</div>
+        <div class="cal-subtitle">
+          Validation accuracy: <strong>${pct}%</strong>
+          (target ≥ ${Math.round(detail.threshold * 100)}%).
+          ${ok
+            ? 'Starting the lesson in a moment…'
+            : 'Quality is below threshold. Continue as-is or recalibrate.'}
+        </div>
+      `;
+      if (progressEl) progressEl.textContent = 'phase 6 / 7 · validation';
+
+    } else if (phase === 'error') {
+      introEl.innerHTML = `
+        <div class="cal-title" style="color: var(--warn, #e08656);">Calibration failed</div>
+        <div class="cal-subtitle">${detail.message}</div>
+        <button class="cal-start-btn" onclick="location.reload()">Try again</button>
+      `;
+      if (progressEl) progressEl.textContent = 'error';
     }
   },
 
-  _runOnePoint(webgazer, x, y, index, total, dotsEl, progressEl) {
+  // ============================================================
+  //   Phase 2: face detection prewarm
+  // ============================================================
+
+  async _prewarmFaceDetection(introEl) {
     const cfg = window.OCULUS_CONFIG;
+    const startedAt = performance.now();
+    let stableSince = null;
+
     return new Promise(resolve => {
-      const dot = document.createElement('div');
-      dot.className = 'cal-dot';
-      dot.style.left = x + 'px';
-      dot.style.top = y + 'px';
+      let lastTs = 0;
+      const tick = () => {
+        const now = performance.now();
+        // Monotonic timestamp (MediaPipe requires strictly increasing)
+        const ts = Math.max(lastTs + 1, Math.floor(now));
+        lastTs = ts;
 
-      dot.addEventListener('click', async () => {
-        // Feed WebGazer several samples at this click location.
-        for (let k = 0; k < cfg.CALIBRATION_SAMPLES_PER_CLICK; k++) {
-          try {
-            webgazer.recordScreenPosition(x, y, 'click');
-          } catch (e) {
-            console.warn('recordScreenPosition failed:', e);
+        const result = window.FaceLandmarker.detectFrame(ts);
+        const features = window.Features.extract(result);
+
+        const statusEl = introEl.querySelector('#cal-prewarm-status');
+
+        if (!features) {
+          if (statusEl) {
+            statusEl.textContent = 'no face detected — check lighting';
+            statusEl.className = 'warn';
           }
-          await new Promise(r => setTimeout(r, cfg.CALIBRATION_SAMPLE_INTERVAL_MS));
+          stableSince = null;
+        } else {
+          // Average EAR across both eyes — single-eye winks shouldn't gate
+          const earAvg = (features[4] + features[5]) / 2;
+          if (earAvg >= cfg.EAR_OPEN_THRESHOLD) {
+            if (stableSince === null) stableSince = now;
+            const stableFor = now - stableSince;
+            if (statusEl) {
+              statusEl.textContent = `face detected — ${(stableFor / 1000).toFixed(1)}s stable`;
+              statusEl.className = 'ok';
+            }
+            if (stableFor >= cfg.PREWARM_FACE_DETECTION_MS) {
+              resolve(true);
+              return;
+            }
+          } else {
+            if (statusEl) {
+              statusEl.textContent = 'eyes closed — open your eyes';
+              statusEl.className = 'warn';
+            }
+            stableSince = null;
+          }
         }
-        dot.classList.add('clicked');
-        progressEl.textContent = `${index + 1} / ${total}`;
-        setTimeout(() => {
-          dot.remove();
-          resolve();
-        }, 280);
-      });
 
-      dotsEl.appendChild(dot);
+        if (now - startedAt > cfg.PREWARM_MAX_WAIT_MS) {
+          resolve(false);
+          return;
+        }
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+  },
+
+  // ============================================================
+  //   Phase 3: per-brick sample collection
+  // ============================================================
+
+  async _collectForBrick(brickEl) {
+    const cfg = window.OCULUS_CONFIG;
+    const brickId = brickEl.dataset.brickId;
+
+    // Spotlight this brick
+    document.querySelectorAll('.brick.cal-active').forEach(el => el.classList.remove('cal-active'));
+    brickEl.classList.remove('cal-dim');
+    brickEl.classList.add('cal-active');
+
+    // Scroll the brick into view first, then place the dot at its center
+    brickEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    await new Promise(r => setTimeout(r, 300));
+
+    const rect = brickEl.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+
+    const dot = document.createElement('div');
+    dot.className = 'cal-brick-dot';
+    dot.style.left = cx + 'px';
+    dot.style.top = cy + 'px';
+
+    const progress = document.createElement('div');
+    progress.className = 'cal-brick-progress';
+    progress.style.left = cx + 'px';
+    progress.style.top  = cy + 'px';
+    progress.innerHTML = '<div class="bar"></div>';
+
+    document.body.appendChild(dot);
+    document.body.appendChild(progress);
+
+    const samples = [];
+    const labels = [];
+
+    // Wait for click on the dot
+    await new Promise(resolve => {
+      const onClick = () => {
+        dot.removeEventListener('click', onClick);
+        resolve();
+      };
+      dot.addEventListener('click', onClick);
+    });
+
+    // Collect feature samples over SAMPLE_COLLECTION_DURATION_MS
+    const start = performance.now();
+    const bar = progress.querySelector('.bar');
+    let lastTs = 0;
+
+    while (performance.now() - start < cfg.SAMPLE_COLLECTION_DURATION_MS) {
+      await new Promise(r => requestAnimationFrame(r));
+      const ts = Math.max(lastTs + 1, Math.floor(performance.now()));
+      lastTs = ts;
+      const result = window.FaceLandmarker.detectFrame(ts);
+      const features = window.Features.extract(result);
+      if (features) {
+        samples.push(features);
+        labels.push(brickId);
+      }
+      const pct = Math.min(100, ((performance.now() - start) / cfg.SAMPLE_COLLECTION_DURATION_MS) * 100);
+      if (bar) bar.style.width = pct + '%';
+      if (samples.length >= cfg.SAMPLES_PER_BRICK * 1.5) break; // safety cap
+    }
+
+    // Tear down UI
+    dot.remove();
+    progress.remove();
+    brickEl.classList.remove('cal-active');
+    brickEl.classList.add('cal-dim');
+
+    return { samples, labels };
+  },
+
+  // ============================================================
+  //   Phase 4: 'elsewhere' sample collection
+  // ============================================================
+
+  async _collectElsewhere() {
+    const cfg = window.OCULUS_CONFIG;
+    const samples = [];
+    const start = performance.now();
+    const countdownEl = document.querySelector('#cal-elsewhere-countdown');
+    let lastTs = 0;
+
+    while (performance.now() - start < cfg.ELSEWHERE_SAMPLE_DURATION_MS) {
+      await new Promise(r => requestAnimationFrame(r));
+      const ts = Math.max(lastTs + 1, Math.floor(performance.now()));
+      lastTs = ts;
+      const result = window.FaceLandmarker.detectFrame(ts);
+      const features = window.Features.extract(result);
+      // Face-present-but-looking-away and eyes-closed frames both count;
+      // face-absent returns null and we just skip those for training (in
+      // production, no-face frames will emit null via Features.extract).
+      if (features) samples.push(features);
+
+      const remaining = cfg.ELSEWHERE_SAMPLE_DURATION_MS - (performance.now() - start);
+      if (countdownEl) countdownEl.textContent = (remaining / 1000).toFixed(1) + ' s';
+    }
+    return samples;
+  },
+
+  // ============================================================
+  //   Validation
+  // ============================================================
+
+  _holdoutValidate(samples, labels, holdoutFraction) {
+    if (samples.length === 0) return 0;
+    const n = Math.max(1, Math.floor(samples.length * holdoutFraction));
+    const indices = [];
+    const step = Math.max(1, Math.floor(samples.length / n));
+    for (let i = 0; i < samples.length && indices.length < n; i += step) {
+      indices.push(i);
+    }
+    const heldSamples = indices.map(i => samples[i]);
+    const heldLabels  = indices.map(i => labels[i]);
+    return window.Classifier.validate(heldSamples, heldLabels);
+  },
+
+  async _confirmLowAccuracy(introEl) {
+    return new Promise(resolve => {
+      const row = document.createElement('div');
+      row.style.marginTop = '16px';
+      row.innerHTML = `
+        <button class="cal-start-btn" id="cal-accept">Continue anyway</button>
+        <button class="cal-start-btn" id="cal-recal" style="background: transparent; color: var(--accent); border: 1px solid var(--accent); margin-left: 12px;">Recalibrate</button>
+      `;
+      introEl.appendChild(row);
+      introEl.querySelector('#cal-accept').addEventListener('click', () => resolve(true));
+      introEl.querySelector('#cal-recal').addEventListener('click', () => resolve(false));
     });
   },
 };
-
-window.Calibration = Calibration;
