@@ -26,7 +26,9 @@ const ExportSession = {
       exportedAt: new Date().toISOString(),
       durationMs: Events.state.sessionStart ? now - Events.state.sessionStart : 0,
       gazeSamples: Events.state.gazeSamples,
-      gazeArchitecture: 'classifier_direct_v0.2',
+      gazeArchitecture: window.Classifier
+        ? `gaze_mode_${window.Classifier.mode || 'regression'}_v0.2`
+        : 'unknown',
       classifier: window.Classifier ? window.Classifier.exportMetadata() : null,
       featureNormalization: window.Features ? window.Features.exportNormalization() : null,
       bricks: Object.fromEntries(

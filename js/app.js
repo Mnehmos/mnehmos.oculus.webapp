@@ -51,10 +51,22 @@ const App = {
     });
 
     this.state.gridEl = grid;
-    this.state.totalPages = Content.totalPages(lesson);
-    this.state.currentPage = 1;
-    // Show page 1 initially (hides the others)
-    Content.showPage(grid, 1);
+    const mode = window.OCULUS_CONFIG.GAZE_MODE || 'regression';
+    if (mode === 'regression') {
+      // Regression mode is scroll-invariant; show every brick at once
+      // and let the reader scroll naturally. Pagination fields on bricks
+      // still carry authorial intent (soft chapter breaks) but don't
+      // hide anything.
+      this.state.totalPages = 1;
+      this.state.currentPage = 1;
+      grid.querySelectorAll('.brick').forEach(el => el.classList.remove('page-hidden'));
+    } else {
+      // Classification mode: paginate to avoid scroll (brick-to-screen
+      // mapping must stay stable).
+      this.state.totalPages = Content.totalPages(lesson);
+      this.state.currentPage = 1;
+      Content.showPage(grid, 1);
+    }
     this._updatePageIndicator();
 
     this._bindControls();

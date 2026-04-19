@@ -10,14 +10,21 @@
 window.runClassifierTests = async function runClassifierTests() {
   await Test.suite('classifier.js — build() + predict()', async () => {
 
-    await Test.test('build() creates a tf.Model', () => {
-      window.Classifier.build(['B01', 'B02', 'elsewhere']);
+    await Test.test('build(classification) creates a tf.Model', () => {
+      window.Classifier.build({ mode: 'classification', brickIds: ['B01', 'B02', 'elsewhere'] });
       Test.assert(window.Classifier.model != null, 'model not created');
       Test.assertEqual(window.Classifier.brickIds.length, 3, 'wrong classes count');
+      Test.assertEqual(window.Classifier.mode, 'classification');
     });
 
-    await Test.test('predict() returns distribution summing to ~1', () => {
-      window.Classifier.build(['B01', 'B02', 'elsewhere']);
+    await Test.test('build(regression) creates a tf.Model with 2-neuron output', () => {
+      window.Classifier.build({ mode: 'regression' });
+      Test.assert(window.Classifier.model != null, 'regression model not created');
+      Test.assertEqual(window.Classifier.mode, 'regression');
+    });
+
+    await Test.test('predict() returns distribution summing to ~1 (classification)', () => {
+      window.Classifier.build({ mode: 'classification', brickIds: ['B01', 'B02', 'elsewhere'] });
       const features = new Float32Array(24).fill(0.5);
       const dist = window.Classifier.predict(features);
       Test.assert(dist != null, 'predict returned null');
@@ -25,15 +32,19 @@ window.runClassifierTests = async function runClassifierTests() {
       Test.assertClose(sum, 1, 0.01, `softmax sum=${sum}`);
     });
 
+    await Test.test('predict() returns {x, y} in regression mode', () => {
+      window.Classifier.build({ mode: 'regression' });
+      const features = new Float32Array(24).fill(0.5);
+      const out = window.Classifier.predict(features);
+      Test.assert(out != null, 'predict returned null');
+      Test.assert('x' in out && 'y' in out, 'regression output missing x/y');
+    });
+
     await Test.test('argmax returns null for low-confidence predictions', () => {
-      // Untrained model has near-uniform output; with 3 classes each ≈ 0.33
-      // and CONFIDENCE_THRESHOLD = 0.4 → argmax should return null.
-      window.Classifier.build(['B01', 'B02', 'elsewhere']);
+      window.Classifier.build({ mode: 'classification', brickIds: ['B01', 'B02', 'elsewhere'] });
       const features = new Float32Array(24).fill(0.0);
       const dist = window.Classifier.predict(features);
       const id = window.Classifier.argmax(dist);
-      // Untrained model *can* occasionally cross the threshold with 3 classes;
-      // accept either null OR a real brick id, but not 'elsewhere'.
       if (id !== null) {
         Test.assert(window.Classifier.brickIds.includes(id), 'argmax returned unknown id');
         Test.assert(id !== 'elsewhere', "argmax should never surface 'elsewhere'");
@@ -41,9 +52,7 @@ window.runClassifierTests = async function runClassifierTests() {
     });
 
     await Test.test("argmax returns null when 'elsewhere' wins", () => {
-      window.Classifier.build(['B01', 'elsewhere']);
-      // Force-set weights so 'elsewhere' dominates — not trivial; instead, fake
-      // by passing a high-confidence distribution directly.
+      window.Classifier.build({ mode: 'classification', brickIds: ['B01', 'elsewhere'] });
       const fakeDist = { B01: 0.2, elsewhere: 0.8 };
       Test.assert(window.Classifier.argmax(fakeDist) === null, "should map 'elsewhere' → null");
     });
@@ -53,7 +62,7 @@ window.runClassifierTests = async function runClassifierTests() {
 
     await Test.test('trains to >90% val_accuracy on 3 linearly-separable classes', async () => {
       const classes = ['B01', 'B02', 'B03'];
-      window.Classifier.build(classes);
+      window.Classifier.build({ mode: 'classification', brickIds: classes });
 
       // Each class: 40 samples. Feature[0] is the only distinguishing dim.
       //   B01 centers at feature[0] = 0.0

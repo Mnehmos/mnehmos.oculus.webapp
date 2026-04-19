@@ -67,14 +67,25 @@ window.OCULUS_CONFIG = {
     'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.34/wasm',
 
   // --- Classifier ---
+  // GAZE_MODE: 'regression' | 'classification'
+  //   'regression' (default): model outputs continuous (x, y) viewport
+  //     coords and Oculus hit-tests with elementsFromPoint. Scroll-invariant,
+  //     layout-agnostic, bricks can be added/moved without retraining.
+  //   'classification': model outputs a brick-id probability distribution
+  //     directly. Faster at inference, more robust per-sample, but requires
+  //     scroll lock and retrains on any layout change. (Original v0.2 design.)
+  GAZE_MODE: 'regression',
+
   FEATURE_VECTOR_DIM: 24,
   CLASSIFIER_HIDDEN_UNITS: 16,
   CLASSIFIER_EPOCHS: 100,
   CLASSIFIER_BATCH_SIZE: 16,
   CLASSIFIER_LEARNING_RATE: 0.01,
-  // If argmax probability < threshold, emit null ("uncertain") instead of
-  // a brick id. Prevents spurious transitions during saccades / blinks.
+  // Classification mode only: if argmax probability < threshold, emit null.
   CONFIDENCE_THRESHOLD: 0.55,
+  // Regression mode only: blink gate — if average EAR < this, emit null
+  // so blink frames don't generate garbage coord predictions.
+  REGRESSION_EAR_GATE: 0.16,
 
   // --- Calibration UX ---
   // Per-brick sample collection

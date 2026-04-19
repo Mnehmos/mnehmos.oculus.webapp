@@ -30,7 +30,7 @@ window.runPipelineTests = async function runPipelineTests() {
 
       await Test.test('sets up: train classifier on 3 brick fixtures', async () => {
         const classes = ['B01', 'B02', 'B03', 'elsewhere'];
-        window.Classifier.build(classes);
+        window.Classifier.build({ mode: 'classification', brickIds: classes });
 
         // Build training sets per class using irisX as distinguisher
         // B01 = gaze left   (irisX = -0.6)

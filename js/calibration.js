@@ -69,16 +69,18 @@ window.Calibration = {
     const mainLayout = document.getElementById('main-layout');
     if (mainLayout) mainLayout.style.visibility = 'visible';
 
-    // Iterate page by page. For each page: show only that page's bricks,
-    // dim them, then run per-brick sample collection for each content
-    // brick on that page. This avoids auto-scroll — every brick is fully
-    // visible when it's that brick's turn.
-    const allPages = Array.from(
-      new Set(Array.from(gridEl.querySelectorAll('.brick')).map(el => parseInt(el.dataset.page, 10)))
-    ).sort((a, b) => a - b);
+    const mode = cfg.GAZE_MODE || 'regression';
 
-    const contentBricksAll = Array.from(gridEl.querySelectorAll('.brick'))
-      .filter(el => el.dataset.brickType !== 'hint');
+    // In regression mode, show EVERY brick simultaneously — the model
+    // learns viewport-coord targets and scrolling is expected at read
+    // time, so we scroll to bring each brick into view when its turn
+    // comes. In classification mode, we isolate one page at a time
+    // (brick-to-screen mapping has to stay stable).
+    const allBricks = Array.from(gridEl.querySelectorAll('.brick'));
+    const allPages = Array.from(
+      new Set(allBricks.map(el => parseInt(el.dataset.page, 10)))
+    ).sort((a, b) => a - b);
+    const contentBricksAll = allBricks.filter(el => el.dataset.brickType !== 'hint');
 
     if (contentBricksAll.length === 0) {
       throw new Error('No content bricks to calibrate against');
@@ -86,24 +88,28 @@ window.Calibration = {
 
     const allSamples = [];
     const allLabels  = [];
-    let calibIdx = 0;
 
-    for (const page of allPages) {
-      window.Content.showPage(gridEl, page);
-      // Give the page a frame to lay out before measuring rects
+    if (mode === 'regression') {
+      // Show all pages at once; user scrolls as needed (or we scroll
+      // on their behalf in _collectForBrick). The classifier learns
+      // (iris, head pose) → (viewport x, y) and is page-agnostic.
+      for (const p of allPages) window.Content.showPage(gridEl, p);
+      const showAll = () => {
+        for (const el of allBricks) el.classList.remove('page-hidden');
+      };
+      showAll();
       await new Promise(r => requestAnimationFrame(r));
 
-      const pageContentBricks = Array.from(gridEl.querySelectorAll('.brick:not(.page-hidden)'))
-        .filter(el => el.dataset.brickType !== 'hint');
-      for (const b of pageContentBricks) b.classList.add('cal-dim');
+      for (const b of contentBricksAll) b.classList.add('cal-dim');
 
-      for (const brickEl of pageContentBricks) {
+      let calibIdx = 0;
+      for (const brickEl of contentBricksAll) {
         calibIdx++;
         this._renderPhase(introEl, progressEl, 'brick', {
           idx: calibIdx,
           total: contentBricksAll.length,
           brickId: brickEl.dataset.brickId,
-          page,
+          page: parseInt(brickEl.dataset.page, 10),
           totalPages: allPages.length,
         });
         const { samples, labels } = await this._collectForBrick(brickEl);
@@ -111,43 +117,81 @@ window.Calibration = {
         allLabels.push(...labels);
       }
 
-      for (const b of pageContentBricks) b.classList.remove('cal-dim', 'cal-active');
+      for (const b of contentBricksAll) b.classList.remove('cal-dim', 'cal-active');
+
+    } else {
+      // Classification mode: page-by-page isolation.
+      let calibIdx = 0;
+      for (const page of allPages) {
+        window.Content.showPage(gridEl, page);
+        await new Promise(r => requestAnimationFrame(r));
+
+        const pageContentBricks = Array.from(gridEl.querySelectorAll('.brick:not(.page-hidden)'))
+          .filter(el => el.dataset.brickType !== 'hint');
+        for (const b of pageContentBricks) b.classList.add('cal-dim');
+
+        for (const brickEl of pageContentBricks) {
+          calibIdx++;
+          this._renderPhase(introEl, progressEl, 'brick', {
+            idx: calibIdx,
+            total: contentBricksAll.length,
+            brickId: brickEl.dataset.brickId,
+            page,
+            totalPages: allPages.length,
+          });
+          const { samples, labels } = await this._collectForBrick(brickEl);
+          allSamples.push(...samples);
+          allLabels.push(...labels);
+        }
+
+        for (const b of pageContentBricks) b.classList.remove('cal-dim', 'cal-active');
+      }
+      // Restore first page for reading
+      window.Content.showPage(gridEl, allPages[0]);
     }
 
-    // Finally, restore the first page as the reading starting point.
-    window.Content.showPage(gridEl, allPages[0]);
+    // ---------- Phase 4: 'elsewhere' samples (classification only) ----------
+    // Regression mode doesn't need an 'elsewhere' class — hit-test
+    // naturally returns null when predicted coords land on non-brick
+    // content, and REGRESSION_EAR_GATE handles blinks.
+    if (mode === 'classification') {
+      this._renderPhase(introEl, progressEl, 'elsewhere', {});
+      const elsewhere = await this._collectElsewhere();
+      allSamples.push(...elsewhere);
+      allLabels.push(...elsewhere.map(() => 'elsewhere'));
+    }
 
-    // ---------- Phase 4: 'elsewhere' samples ----------
-    this._renderPhase(introEl, progressEl, 'elsewhere', {});
-    const elsewhere = await this._collectElsewhere();
-    allSamples.push(...elsewhere);
-    allLabels.push(...elsewhere.map(() => 'elsewhere'));
-
-    // ---------- Phase 5: train the classifier ----------
+    // ---------- Phase 5: train ----------
     this._renderPhase(introEl, progressEl, 'training', {});
 
     window.Features.computeNormalization(allSamples);
     const normalizedSamples = allSamples.map(s => window.Features.normalize(s));
 
-    const brickIds = contentBricksAll.map(b => b.dataset.brickId);
-    brickIds.push('elsewhere');
+    if (mode === 'regression') {
+      window.Classifier.build({ mode: 'regression' });
+    } else {
+      const brickIds = contentBricksAll.map(b => b.dataset.brickId);
+      brickIds.push('elsewhere');
+      window.Classifier.build({ mode: 'classification', brickIds });
+    }
 
-    window.Classifier.build(brickIds);
     await window.Classifier.train(normalizedSamples, allLabels, (epoch, logs) => {
       const lossEl = introEl.querySelector('#cal-train-loss');
       if (lossEl && logs) {
-        lossEl.textContent = `epoch ${epoch + 1}/${cfg.CLASSIFIER_EPOCHS} · loss ${logs.loss.toFixed(3)}`;
+        lossEl.textContent = `epoch ${epoch + 1}/${cfg.CLASSIFIER_EPOCHS} · loss ${logs.loss.toFixed(4)}`;
       }
     });
 
     // ---------- Phase 6: validate ----------
-    // Use a held-out 20% of samples (sampled evenly) as a smoke test.
-    // tf.fit's val_acc is the more rigorous number; this just guards
-    // against a pathological constant-output model.
+    // Held-out 20% of samples (sampled evenly). For classification,
+    // validate() returns top-1 accuracy; for regression, it returns
+    // a 1 - meanErr/200px score (0 bad, 1 perfect).
     const accuracy = this._holdoutValidate(normalizedSamples, allLabels, 0.2);
     this._renderPhase(introEl, progressEl, 'validation', {
       accuracy: accuracy,
       threshold: cfg.VALIDATION_ACCURACY_THRESHOLD,
+      mode,
+      meanError: window.Classifier.validationError,
     });
 
     if (accuracy < cfg.VALIDATION_ACCURACY_THRESHOLD) {
@@ -233,14 +277,16 @@ window.Calibration = {
     } else if (phase === 'validation') {
       const pct = Math.round(detail.accuracy * 100);
       const ok = detail.accuracy >= detail.threshold;
+      const errText = detail.mode === 'regression' && detail.meanError != null
+        ? `Mean error: <strong>${Math.round(detail.meanError)}px</strong>.`
+        : `Validation accuracy: <strong>${pct}%</strong> (target ≥ ${Math.round(detail.threshold * 100)}%).`;
       introEl.innerHTML = `
         <div class="cal-title">${ok ? 'Ready.' : 'Calibration a bit shaky.'}</div>
         <div class="cal-subtitle">
-          Validation accuracy: <strong>${pct}%</strong>
-          (target ≥ ${Math.round(detail.threshold * 100)}%).
+          ${errText}
           ${ok
-            ? 'Starting the lesson in a moment…'
-            : 'Quality is below threshold. Continue as-is or recalibrate.'}
+            ? ' Starting the lesson in a moment…'
+            : ' Quality is below threshold. Continue as-is or recalibrate.'}
         </div>
       `;
       if (progressEl) progressEl.textContent = 'phase 6 / 7 · validation';
@@ -323,21 +369,28 @@ window.Calibration = {
   async _collectForBrick(brickEl) {
     const cfg = window.OCULUS_CONFIG;
     const brickId = brickEl.dataset.brickId;
+    const mode = cfg.GAZE_MODE || 'regression';
 
     // Spotlight this brick
     document.querySelectorAll('.brick.cal-active').forEach(el => el.classList.remove('cal-active'));
     brickEl.classList.remove('cal-dim');
     brickEl.classList.add('cal-active');
 
-    // Do NOT auto-scroll. Auto-scroll makes the user's eyes follow the
-    // content, which corrupts the calibration mapping. All bricks should
-    // fit in the viewport — we page-break at lesson authoring time
-    // rather than scrolling. Wait one frame so the .cal-active class
-    // has landed on the brick.
-    await new Promise(r => requestAnimationFrame(r));
+    // In regression mode we permit scroll-into-view so long lessons work
+    // (target = viewport coords at click time, so the classifier learns
+    // "looking at *this* viewport position" regardless of what brick it
+    // was). In classification mode we keep the no-scroll policy since
+    // scroll changes which iris-position maps to which brick.
+    if (mode === 'regression') {
+      // Smooth scroll is fine here because we read the rect AFTER the
+      // click (user clicks when steady), not before.
+      brickEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      await new Promise(r => setTimeout(r, 350));
+    } else {
+      await new Promise(r => requestAnimationFrame(r));
+    }
 
-    // The dot and progress bar are position: fixed, so they take viewport
-    // coordinates directly from getBoundingClientRect() — no scroll math.
+    // The dot and progress bar are position: fixed — viewport coords.
     const rect = brickEl.getBoundingClientRect();
     const cx = rect.left + rect.width / 2;
     const cy = rect.top + rect.height / 2;
@@ -368,6 +421,15 @@ window.Calibration = {
       dot.addEventListener('click', onClick);
     });
 
+    // Re-measure AFTER the click — the user may have scrolled slightly,
+    // or we may have scrolled when the next brick was off-screen.
+    const rectNow = brickEl.getBoundingClientRect();
+    const targetPxX = rectNow.left + rectNow.width / 2;
+    const targetPxY = rectNow.top  + rectNow.height / 2;
+    // Normalized viewport coords [0, 1] for regression mode.
+    const targetNormX = targetPxX / window.innerWidth;
+    const targetNormY = targetPxY / window.innerHeight;
+
     // Collect feature samples over SAMPLE_COLLECTION_DURATION_MS
     const start = performance.now();
     const bar = progress.querySelector('.bar');
@@ -381,7 +443,11 @@ window.Calibration = {
       const features = window.Features.extract(result);
       if (features) {
         samples.push(features);
-        labels.push(brickId);
+        if (mode === 'regression') {
+          labels.push({ x: targetNormX, y: targetNormY });
+        } else {
+          labels.push(brickId);
+        }
       }
       const pct = Math.min(100, ((performance.now() - start) / cfg.SAMPLE_COLLECTION_DURATION_MS) * 100);
       if (bar) bar.style.width = pct + '%';

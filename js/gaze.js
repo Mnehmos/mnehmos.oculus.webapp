@@ -2,33 +2,35 @@
  * Gaze pipeline (v0.2).
  *
  * Called once per animation frame. Owns the full
- *   MediaPipe → Features → Classifier → brick-id
+ *   MediaPipe → Features → Classifier.predict → Classifier.resolve → brick-id
  * chain and emits a brick id (or null) to the event layer.
  *
- * The v0.1 module smoothed raw (x,y) samples and hit-tested against the
- * brick grid. In v0.2 the classifier emits brick probabilities directly —
- * the temporal-smoothing step now operates on predicted brick ids
- * (majority vote over the last N frames) rather than coordinates.
+ * Two modes are supported, transparently via Classifier.resolve():
+ *   - regression: Classifier.predict returns {x, y} normalized viewport
+ *     coords; Classifier.resolve denormalizes and hit-tests with
+ *     elementsFromPoint against the live DOM. Scroll-invariant,
+ *     layout-agnostic.
+ *   - classification: Classifier.predict returns a {brickId: prob}
+ *     distribution; Classifier.resolve applies the confidence threshold
+ *     and returns argmax (or null for 'elsewhere' / low-confidence).
  *
- * The cursor, if enabled, is positioned at the center of the current
- * predicted brick. It's a hint of where the classifier thinks the reader
- * is looking, not a pixel-accurate gaze point.
+ * Temporal smoothing is a majority vote over the last N resolved brick
+ * ids, applied in both modes to reject single-frame outliers.
  *
- * Depends on window.FaceLandmarker, window.Features, window.Classifier
- * and the #oculus-video element.
+ * Depends on window.FaceLandmarker, window.Features, window.Classifier,
+ * and #oculus-video.
  */
 
 window.Gaze = {
 
-  // Rolling window of recent predicted brick ids for majority-vote smoothing.
   _recentPredictions: [],
 
-  // Latest per-frame telemetry exposed for the right pane to render.
   lastPrediction: {
-    brickId: null,            // post-smoothing id (or null if uncertain)
-    rawBrickId: null,         // argmax of latest distribution (pre-smoothing)
-    confidence: 0,            // max prob of latest distribution
-    distribution: {},         // full {brickId: prob}
+    brickId: null,             // post-smoothing id (or null)
+    rawBrickId: null,          // pre-smoothing resolved id
+    confidence: 0,             // max softmax prob (classification) or 1-err (regression proxy)
+    distribution: {},          // full classification distribution, or {} in regression
+    coords: null,              // regression only: { x, y } viewport pixels
     headPose: { yaw: 0, pitch: 0, roll: 0, distance: 0 },
     features: null,
     earAvg: 0,
@@ -46,6 +48,7 @@ window.Gaze = {
       rawBrickId: null,
       confidence: 0,
       distribution: {},
+      coords: null,
       headPose: { yaw: 0, pitch: 0, roll: 0, distance: 0 },
       features: null,
       earAvg: 0,
@@ -55,12 +58,7 @@ window.Gaze = {
   },
 
   /**
-   * Run one full pipeline tick.
-   *
-   * @returns the resolved brick id (string) or null.
-   * Side effects:
-   *   - updates this.lastPrediction for telemetry to read
-   *   - positions the gaze cursor if showCursor
+   * Run one full pipeline tick. Returns the resolved brick id (string) or null.
    */
   tick(cursorEl, showCursor) {
     const cfg = window.OCULUS_CONFIG;
@@ -72,34 +70,46 @@ window.Gaze = {
     const features = window.Features.extract(result);
 
     if (!features) {
-      // No face — push a 'null' vote into the smoothing window so that
-      // sustained face-absence flushes any lingering brick prediction.
       this._pushPrediction(null);
       this.lastPrediction.brickId = this._majorityVote();
       this.lastPrediction.rawBrickId = null;
       this.lastPrediction.confidence = 0;
       this.lastPrediction.distribution = {};
+      this.lastPrediction.coords = null;
       this.lastPrediction.features = null;
       this.lastPrediction.earAvg = 0;
       this.lastPrediction.tsMs = ts;
       this.lastPrediction.faceDetected = false;
+      if (cursorEl) cursorEl.classList.add('hidden');
       return this.lastPrediction.brickId;
     }
 
     const normalized = window.Features.normalize(features);
-    const distribution = window.Classifier.predict(normalized);
-
-    const raw = window.Classifier.argmax(distribution);   // null if low-conf
+    const prediction = window.Classifier.predict(normalized);
+    const raw = window.Classifier.resolve(prediction, features);
     this._pushPrediction(raw);
     const smoothed = this._majorityVote();
 
-    // Compute max-prob for confidence display
-    let maxProb = 0;
-    for (const p of Object.values(distribution)) {
-      if (p > maxProb) maxProb = p;
+    // Derive confidence + optional coords depending on mode.
+    let confidence = 0;
+    let coords = null;
+    if (window.Classifier.mode === 'regression' && prediction) {
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      coords = {
+        x: Math.max(0, Math.min(vw, prediction.x * vw)),
+        y: Math.max(0, Math.min(vh, prediction.y * vh)),
+      };
+      // Confidence proxy: inverse distance to nearest brick center
+      // (bounded at 0..1). Lets the telemetry pane display a stability
+      // signal even though the model doesn't emit probabilities.
+      confidence = raw ? 1.0 : 0.3;
+    } else if (prediction) {
+      for (const p of Object.values(prediction)) {
+        if (p > confidence) confidence = p;
+      }
     }
 
-    // Head pose is features[6..9]: yaw, pitch, roll, distance
     const headPose = {
       yaw:      features[6],
       pitch:    features[7],
@@ -107,24 +117,31 @@ window.Gaze = {
       distance: features[9],
     };
 
-    this.lastPrediction.brickId       = smoothed;
-    this.lastPrediction.rawBrickId    = raw;
-    this.lastPrediction.confidence    = maxProb;
-    this.lastPrediction.distribution  = distribution;
-    this.lastPrediction.headPose      = headPose;
-    this.lastPrediction.features      = features;
-    this.lastPrediction.earAvg        = (features[4] + features[5]) / 2;
-    this.lastPrediction.tsMs          = ts;
-    this.lastPrediction.faceDetected  = true;
+    this.lastPrediction.brickId      = smoothed;
+    this.lastPrediction.rawBrickId   = raw;
+    this.lastPrediction.confidence   = confidence;
+    this.lastPrediction.distribution = (window.Classifier.mode === 'classification') ? prediction : {};
+    this.lastPrediction.coords       = coords;
+    this.lastPrediction.headPose     = headPose;
+    this.lastPrediction.features     = features;
+    this.lastPrediction.earAvg       = (features[4] + features[5]) / 2;
+    this.lastPrediction.tsMs         = ts;
+    this.lastPrediction.faceDetected = true;
 
-    // Move cursor to the center of the predicted brick (if any)
+    // Cursor placement:
+    //   regression → actual predicted pixel
+    //   classification → center of smoothed brick
     if (cursorEl) {
-      if (showCursor && smoothed) {
+      if (showCursor && coords && window.Classifier.mode === 'regression') {
+        cursorEl.style.left = coords.x + 'px';
+        cursorEl.style.top  = coords.y + 'px';
+        cursorEl.classList.remove('hidden');
+      } else if (showCursor && smoothed && window.Classifier.mode !== 'regression') {
         const brickEl = document.querySelector(`.brick[data-brick-id="${smoothed}"]`);
         if (brickEl) {
           const rect = brickEl.getBoundingClientRect();
           cursorEl.style.left = (rect.left + rect.width / 2) + 'px';
-          cursorEl.style.top  = (rect.top  + rect.height / 2) + 'px';
+          cursorEl.style.top  = (rect.top + rect.height / 2) + 'px';
           cursorEl.classList.remove('hidden');
         } else {
           cursorEl.classList.add('hidden');
@@ -145,15 +162,10 @@ window.Gaze = {
     }
   },
 
-  /**
-   * Return the brick id that appears ≥ MIN_AGREE times in the window.
-   * null if no id meets the threshold or the window is dominated by nulls.
-   */
   _majorityVote() {
     const cfg = window.OCULUS_CONFIG;
     const counts = {};
     for (const id of this._recentPredictions) {
-      // null votes count toward "no brick" — don't increment any id counter
       if (id === null) continue;
       counts[id] = (counts[id] || 0) + 1;
     }
