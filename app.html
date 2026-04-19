@@ -11,10 +11,21 @@
   <link rel="stylesheet" href="css/style.css">
   <link rel="stylesheet" href="css/app.css">
 
-  <!-- WebGazer.js — loaded from CDN, fetches on first run -->
-  <script src="https://webgazer.cs.brown.edu/webgazer.js" type="text/javascript"></script>
+  <!--
+    TensorFlow.js (Apache 2.0) — in-browser MLP training/inference for the
+    classifier-direct AOI gaze pipeline. MediaPipe Face Landmarker is loaded
+    via dynamic import inside js/face_landmarker.js (it ships as ES module
+    only, so we can't use a plain <script> tag without converting the rest
+    of the app to modules).
+  -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+
+  <!-- Hidden <video> for the webcam stream — consumed by FaceLandmarker. -->
 </head>
 <body class="has-grid">
+
+<!-- Webcam video element. Kept off-screen via CSS; FaceLandmarker reads from it each animation frame. -->
+<video id="oculus-video" playsinline muted autoplay></video>
 
 <!-- ================= CALIBRATION OVERLAY ================= -->
 <div id="calibration-overlay">
@@ -88,8 +99,16 @@
 </div>
 
 <!-- ================= MODULES ================= -->
+<!--
+  Load order matters. FaceLandmarker, Features, Classifier must exist
+  before Calibration and Gaze use them. Events/Controller/Telemetry/Export
+  remain unchanged between v0.1 and v0.2.
+-->
 <script src="js/config.js"></script>
 <script src="js/content.js"></script>
+<script src="js/face_landmarker.js"></script>
+<script src="js/features.js"></script>
+<script src="js/classifier.js"></script>
 <script src="js/calibration.js"></script>
 <script src="js/gaze.js"></script>
 <script src="js/events.js"></script>

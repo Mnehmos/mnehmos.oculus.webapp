@@ -480,3 +480,82 @@
   }
   .doc-title { font-size: 32px; }
 }
+
+/* ---------------- WEBCAM VIDEO ELEMENT (v0.2) ----------------
+   FaceLandmarker reads frames from this element. Positioned off-screen
+   so it's still renderable (required by MediaPipe) but not visible.
+   The calibration overlay shows its own inset preview during prewarm. */
+#oculus-video {
+  position: fixed;
+  top: -10000px;
+  left: -10000px;
+  width: 640px;
+  height: 480px;
+  pointer-events: none;
+}
+
+/* ---------------- CALIBRATION PREVIEW (v0.2) ---------------- */
+#cal-preview {
+  width: 320px;
+  height: 240px;
+  border: 1px solid var(--grid-line);
+  border-radius: 4px;
+  margin: 0 auto 20px;
+  background: #000;
+  object-fit: cover;
+  transform: scaleX(-1); /* Mirror, so user sees themselves naturally */
+}
+
+#cal-prewarm-status {
+  color: var(--fg-dim);
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-bottom: 12px;
+  text-align: center;
+}
+#cal-prewarm-status.ok { color: var(--ok, #7cb972); }
+#cal-prewarm-status.warn { color: var(--warn, #e08656); }
+
+/* Per-brick calibration: fade non-active bricks while one is being calibrated */
+.brick.cal-dim { opacity: 0.08; transition: opacity 0.3s; }
+.brick.cal-active {
+  opacity: 1;
+  box-shadow: 0 0 0 2px var(--accent);
+  transition: opacity 0.3s, box-shadow 0.3s;
+}
+
+/* Pulsing amber dot pinned to the center of the active calibration brick */
+.cal-brick-dot {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 16px var(--accent);
+  transform: translate(-50%, -50%);
+  cursor: pointer;
+  animation: cal-pulse 1.2s ease-in-out infinite;
+  z-index: 110;
+}
+@keyframes cal-pulse {
+  0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+  50%      { transform: translate(-50%, -50%) scale(1.35); opacity: 0.65; }
+}
+
+.cal-brick-progress {
+  position: absolute;
+  width: 56px;
+  height: 4px;
+  background: rgba(244, 184, 96, 0.2);
+  border-radius: 2px;
+  transform: translate(-50%, 18px);
+  overflow: hidden;
+  z-index: 110;
+}
+.cal-brick-progress .bar {
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  transition: width 0.1s linear;
+}
