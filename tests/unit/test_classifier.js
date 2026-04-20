@@ -17,6 +17,16 @@ window.runClassifierTests = async function runClassifierTests() {
       Test.assert(window.Classifier.model != null, 'primary model accessor broken');
     });
 
+    await Test.test('build() honors featureProfile on a head', () => {
+      window.Classifier.build({
+        mode: 'classification',
+        brickIds: ['B01', 'elsewhere'],
+        featureProfile: 'eyes_pose',
+      });
+      Test.assertEqual(window.Classifier.heads[0].featureProfile, 'eyes_pose');
+      Test.assertEqual(window.Classifier.heads[0].featureIndices.length, 20);
+    });
+
     await Test.test('build({mode:regression}) creates a 2-output head', () => {
       window.Classifier.build({ mode: 'regression' });
       Test.assertEqual(window.Classifier.heads.length, 1);
@@ -52,6 +62,13 @@ window.runClassifierTests = async function runClassifierTests() {
       window.Classifier.build({ mode: 'classification', brickIds: ['B01', 'elsewhere'] });
       const fakeDist = { B01: 0.2, elsewhere: 0.8 };
       Test.assert(window.Classifier.argmax(fakeDist) === null, "'elsewhere' maps to null");
+    });
+
+    await Test.test('classification margin gate rejects ambiguous predictions', () => {
+      window.Classifier.build({ mode: 'classification', brickIds: ['B01', 'B02', 'elsewhere'] });
+      const raw = { B01: 0.64, B02: 0.58, elsewhere: 0.01 };
+      const resolved = window.Classifier._resolveOne(window.Classifier.heads[0], raw, null);
+      Test.assertEqual(resolved, null, 'ambiguous winner should resolve to null');
     });
   });
 

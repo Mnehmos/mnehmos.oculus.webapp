@@ -76,10 +76,12 @@ window.OCULUS_CONFIG = {
   // --- Classifier ---
   // GAZE_MODE: backwards-compat default for GAZE_HEADS (see below).
   //   'regression':     predict (x, y) viewport coords, hit-test at read
-  //                     time. Scroll-invariant, layout-agnostic.
-  //   'classification': predict brick-id distribution directly. Requires
-  //                     scroll lock; retrains on layout change.
-  GAZE_MODE: 'regression',
+  //                     time. Useful as a debug cursor, but brittle as the
+  //                     product authority because small misses become full
+  //                     AOI misses.
+  //   'classification': predict brick-id distribution directly. This is the
+  //                     preferred product path for pedagogical events.
+  GAZE_MODE: 'classification',
 
   // GAZE_HEADS: optional multi-head ensemble. When set, Classifier trains
   // every head in the array on the same calibration data and reports
@@ -87,14 +89,26 @@ window.OCULUS_CONFIG = {
   // events + cursor); remaining heads are monitored in telemetry and
   // logged to session export.
   //
-  // When null/undefined (default), a single head is built from GAZE_MODE.
+  // Each head may also set featureProfile:
+  //   'eyes_only' -> iris/EAR/eye blendshapes
+  //   'eyes_pose' -> eyes_only + head pose + distance
+  //   'all'       -> full 24-dim vector
+  //
+  // Default posture:
+  //   - primary classification head on eyes + pose
+  //   - secondary regression head for cursor/debug telemetry only
+  //
+  // When null/undefined, a single head is built from GAZE_MODE.
   //
   // Examples (uncomment to try):
   //   [{ tag: 'R', mode: 'regression' },
   //    { tag: 'C', mode: 'classification' }]
   //   [{ tag: 'R1', mode: 'regression' },
   //    { tag: 'R2', mode: 'regression', hiddenUnits: 32, lr: 0.005 }]
-  GAZE_HEADS: null,
+  GAZE_HEADS: [
+    { tag: 'CLS', mode: 'classification', featureProfile: 'eyes_pose' },
+    { tag: 'REGDBG', mode: 'regression', featureProfile: 'all' },
+  ],
 
   FEATURE_VECTOR_DIM: 24,
   CLASSIFIER_HIDDEN_UNITS: 16,
@@ -107,8 +121,11 @@ window.OCULUS_CONFIG = {
   // track perfectly (saccade delay + head micromotion meant the label
   // position didn't match the actual gaze at that instant). Stationary
   // targets with a denser grid of points gives cleaner training data.
-  // Classification mode only: if argmax probability < threshold, emit null.
-  CONFIDENCE_THRESHOLD: 0.55,
+  // Classification mode only: emit null if the winner is weak OR barely beats
+  // the runner-up. Ambiguous frames are better treated as unknown than forced
+  // into a false brick transition.
+  CONFIDENCE_THRESHOLD: 0.62,
+  CLASSIFICATION_MARGIN_THRESHOLD: 0.12,
   // Regression mode only: blink gate — if average EAR < this, emit null
   // so blink frames don't generate garbage coord predictions.
   REGRESSION_EAR_GATE: 0.16,
@@ -126,7 +143,7 @@ window.OCULUS_CONFIG = {
   //             user clicks each. Auto-scrolls long lessons so each
   //             brick is in view. Scroll can corrupt samples if the
   //             user's eyes track the moving content.
-  CALIBRATION_METHOD: 'grid',
+  CALIBRATION_METHOD: 'brick',
 
   // Grid parameters (used when CALIBRATION_METHOD = 'grid').
   // 5x3 = 15 points. The extra column helps side-eye accuracy — iris
@@ -140,8 +157,22 @@ window.OCULUS_CONFIG = {
   GRID_EDGE_MARGIN_PCT: 0.07,
 
   // Per-dot sample collection (applies to both methods)
-  SAMPLES_PER_BRICK: 50,
+  // Target accepted samples per target/brick. Collection ends early once this
+  // many clean frames have been accepted; the sampler extends up to the max
+  // duration if too many frames are rejected by the stability gates.
+  SAMPLES_PER_BRICK: 32,
   SAMPLE_COLLECTION_DURATION_MS: 1500,
+  SAMPLE_COLLECTION_MAX_DURATION_MS: 2800,
+  CALIBRATION_SETTLE_MS: 220,
+  CALIBRATION_EAR_GATE: 0.2,
+  CALIBRATION_BLINK_MAX: 0.45,
+  CALIBRATION_MAX_YAW_DRIFT_RAD: 0.12,
+  CALIBRATION_MAX_PITCH_DRIFT_RAD: 0.12,
+  CALIBRATION_MAX_ROLL_DRIFT_RAD: 0.14,
+  CALIBRATION_MAX_DISTANCE_DRIFT_CM: 4.5,
+  CALIBRATION_MAX_FACE_CENTER_DRIFT: 0.05,
+  CALIBRATION_MAX_FACE_SIZE_DRIFT: 0.04,
+  CALIBRATION_STABILITY_EMA_ALPHA: 0.25,
   // Face-detection prewarm: show the preview, wait for a stable face
   PREWARM_FACE_DETECTION_MS: 1500,
   PREWARM_MAX_WAIT_MS: 15000,

@@ -494,32 +494,14 @@ window.Calibration = {
     const cxView = rectNow.left + rectNow.width / 2;
     const cyView = rectNow.top  + rectNow.height / 2;
 
-    // Stationary dot at brick center. Stare, collect, done.
-    const totalMs = cfg.SAMPLE_COLLECTION_DURATION_MS;
     const normX = cxView / window.innerWidth;
     const normY = cyView / window.innerHeight;
-
-    const start = performance.now();
     const bar = progress.querySelector('.bar');
-    let lastTs = 0;
-
-    while (performance.now() - start < totalMs) {
-      await new Promise(r => requestAnimationFrame(r));
-      const elapsed = performance.now() - start;
-
-      const ts = Math.max(lastTs + 1, Math.floor(performance.now()));
-      lastTs = ts;
-      const result = window.FaceLandmarker.detectFrame(ts);
-      const features = window.Features.extract(result);
-      if (features) {
-        samples.push(features);
-        regLabels.push({ x: normX, y: normY });
-        clsLabels.push(brickId);
-      }
-      const pct = Math.min(100, (elapsed / totalMs) * 100);
-      if (bar) bar.style.width = pct + '%';
-      if (samples.length >= cfg.SAMPLES_PER_BRICK * 2) break;
-    }
+    await this._collectAcceptedCalibrationFrames(bar, features => {
+      samples.push(features);
+      regLabels.push({ x: normX, y: normY });
+      clsLabels.push(brickId);
+    });
 
     // Tear down UI
     dot.remove();
@@ -655,32 +637,107 @@ window.Calibration = {
       dot.addEventListener('click', onClick);
     });
 
-    // Stationary dot. Stare at it.
-    const totalMs = cfg.SAMPLE_COLLECTION_DURATION_MS;
-    const start = performance.now();
     const bar = progress.querySelector('.bar');
-    let lastTs = 0;
-
-    while (performance.now() - start < totalMs) {
-      await new Promise(r => requestAnimationFrame(r));
-      const elapsed = performance.now() - start;
-
-      const ts = Math.max(lastTs + 1, Math.floor(performance.now()));
-      lastTs = ts;
-      const result = window.FaceLandmarker.detectFrame(ts);
-      const features = window.Features.extract(result);
-      if (features) {
-        samples.push(features);
-        regLabels.push({ x: point.xFrac, y: point.yFrac });
-      }
-      const pct = Math.min(100, (elapsed / totalMs) * 100);
-      if (bar) bar.style.width = pct + '%';
-      if (samples.length >= cfg.SAMPLES_PER_BRICK * 2) break;
-    }
+    await this._collectAcceptedCalibrationFrames(bar, features => {
+      samples.push(features);
+      regLabels.push({ x: point.xFrac, y: point.yFrac });
+    });
 
     dot.remove();
     progress.remove();
     return { samples, regLabels };
+  },
+
+  async _collectAcceptedCalibrationFrames(barEl, onAccept) {
+    const cfg = window.OCULUS_CONFIG;
+    const settleMs = Math.max(0, cfg.CALIBRATION_SETTLE_MS || 0);
+    const hardLimitMs = Math.max(
+      cfg.SAMPLE_COLLECTION_DURATION_MS || 0,
+      cfg.SAMPLE_COLLECTION_MAX_DURATION_MS || 0
+    );
+    const targetSamples = Math.max(1, cfg.SAMPLES_PER_BRICK || 1);
+    const startedAt = performance.now();
+    const usableAt = startedAt + settleMs;
+    const qualityState = { baseline: null };
+    let lastTs = 0;
+    let accepted = 0;
+
+    while ((performance.now() - startedAt) < hardLimitMs) {
+      await new Promise(r => requestAnimationFrame(r));
+      const now = performance.now();
+      if (now < usableAt) continue;
+
+      const ts = Math.max(lastTs + 1, Math.floor(now));
+      lastTs = ts;
+      const result = window.FaceLandmarker.detectFrame(ts);
+      const features = window.Features.extract(result);
+      if (features && this._acceptCalibrationFrame(features, qualityState)) {
+        onAccept(features);
+        accepted++;
+        if (barEl) barEl.style.width = Math.min(100, (accepted / targetSamples) * 100) + '%';
+        if (accepted >= targetSamples) break;
+      }
+    }
+
+    if (accepted === 0) {
+      for (let i = 0; i < 8; i++) {
+        await new Promise(r => requestAnimationFrame(r));
+        const now = performance.now();
+        const ts = Math.max(lastTs + 1, Math.floor(now));
+        lastTs = ts;
+        const result = window.FaceLandmarker.detectFrame(ts);
+        const features = window.Features.extract(result);
+        const earAvg = features ? (features[4] + features[5]) / 2 : 0;
+        if (features && earAvg >= (cfg.CALIBRATION_EAR_GATE ?? cfg.EAR_OPEN_THRESHOLD)) {
+          onAccept(features);
+          accepted = 1;
+          break;
+        }
+      }
+    }
+
+    if (barEl) barEl.style.width = accepted > 0 ? '100%' : '0';
+    return accepted;
+  },
+
+  _acceptCalibrationFrame(features, qualityState) {
+    const cfg = window.OCULUS_CONFIG;
+    const earAvg = (features[4] + features[5]) / 2;
+    if (earAvg < (cfg.CALIBRATION_EAR_GATE ?? cfg.EAR_OPEN_THRESHOLD)) return false;
+    if (features[14] > (cfg.CALIBRATION_BLINK_MAX ?? 0.45)) return false;
+    if (features[15] > (cfg.CALIBRATION_BLINK_MAX ?? 0.45)) return false;
+
+    const snap = {
+      yaw: features[6],
+      pitch: features[7],
+      roll: features[8],
+      distance: features[9],
+      faceX: features[10],
+      faceY: features[11],
+      faceW: features[12],
+      faceH: features[13],
+    };
+
+    if (!qualityState.baseline) {
+      qualityState.baseline = { ...snap };
+      return true;
+    }
+
+    const base = qualityState.baseline;
+    if (Math.abs(snap.yaw - base.yaw) > (cfg.CALIBRATION_MAX_YAW_DRIFT_RAD ?? 0.12)) return false;
+    if (Math.abs(snap.pitch - base.pitch) > (cfg.CALIBRATION_MAX_PITCH_DRIFT_RAD ?? 0.12)) return false;
+    if (Math.abs(snap.roll - base.roll) > (cfg.CALIBRATION_MAX_ROLL_DRIFT_RAD ?? 0.14)) return false;
+    if (Math.abs(snap.distance - base.distance) > (cfg.CALIBRATION_MAX_DISTANCE_DRIFT_CM ?? 4.5)) return false;
+    if (Math.abs(snap.faceX - base.faceX) > (cfg.CALIBRATION_MAX_FACE_CENTER_DRIFT ?? 0.05)) return false;
+    if (Math.abs(snap.faceY - base.faceY) > (cfg.CALIBRATION_MAX_FACE_CENTER_DRIFT ?? 0.05)) return false;
+    if (Math.abs(snap.faceW - base.faceW) > (cfg.CALIBRATION_MAX_FACE_SIZE_DRIFT ?? 0.04)) return false;
+    if (Math.abs(snap.faceH - base.faceH) > (cfg.CALIBRATION_MAX_FACE_SIZE_DRIFT ?? 0.04)) return false;
+
+    const alpha = cfg.CALIBRATION_STABILITY_EMA_ALPHA ?? 0.25;
+    for (const key of Object.keys(base)) {
+      base[key] = alpha * snap[key] + (1 - alpha) * base[key];
+    }
+    return true;
   },
 
   /**

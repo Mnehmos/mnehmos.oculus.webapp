@@ -77,10 +77,14 @@ window.Classifier = {
     const tag = cfgHead.tag || (mode === 'regression' ? `R${idx}` : `C${idx}`);
     const hidden = cfgHead.hiddenUnits || cfg.CLASSIFIER_HIDDEN_UNITS;
     const lr = cfgHead.lr || cfg.CLASSIFIER_LEARNING_RATE;
+    const featureProfile = cfgHead.featureProfile || 'all';
+    const featureIndices = window.Features
+      ? window.Features.resolveFeatureIndices(cfgHead.featureIndices || featureProfile)
+      : Array.from({ length: cfg.FEATURE_VECTOR_DIM }, (_, i) => i);
 
     const m = tf.sequential();
     m.add(tf.layers.dense({
-      inputShape: [cfg.FEATURE_VECTOR_DIM],
+      inputShape: [featureIndices.length],
       units: hidden,
       activation: 'relu',
       kernelInitializer: 'heNormal',
@@ -117,6 +121,8 @@ window.Classifier = {
 
     return {
       tag, mode, hidden, lr,
+      featureProfile,
+      featureIndices,
       model: m,
       brickIds,
       trainingHistory: null,
@@ -139,68 +145,67 @@ window.Classifier = {
     if (this.heads.length === 0) throw new Error('Classifier.train: no heads built');
 
     const n = features.length;
-    const dim = cfg.FEATURE_VECTOR_DIM;
-    const xs = new Float32Array(n * dim);
-    for (let i = 0; i < n; i++) xs.set(features[i], i * dim);
-    const xTensor = tf.tensor2d(xs, [n, dim]);
-
-    try {
-      for (const head of this.heads) {
-        const labels = labelsByMode[head.mode];
-        if (!labels || labels.length !== n) {
-          throw new Error(`train: missing/mismatched labels for mode "${head.mode}"`);
-        }
-
-        let yTensor;
-        if (head.mode === 'regression') {
-          const ys = new Float32Array(n * 2);
-          for (let i = 0; i < n; i++) {
-            ys[i * 2]     = labels[i].x;
-            ys[i * 2 + 1] = labels[i].y;
-          }
-          yTensor = tf.tensor2d(ys, [n, 2]);
-        } else {
-          const numClasses = head.brickIds.length;
-          const ys = new Float32Array(n * numClasses);
-          for (let i = 0; i < n; i++) {
-            const classIdx = head.brickIds.indexOf(labels[i]);
-            if (classIdx < 0) throw new Error(`unknown label "${labels[i]}"`);
-            ys[i * numClasses + classIdx] = 1;
-          }
-          yTensor = tf.tensor2d(ys, [n, numClasses]);
-        }
-
-        let history;
-        try {
-          history = await head.model.fit(xTensor, yTensor, {
-            epochs: cfg.CLASSIFIER_EPOCHS,
-            batchSize: cfg.CLASSIFIER_BATCH_SIZE,
-            shuffle: true,
-            validationSplit: 0.1,
-            callbacks: onEpochEnd
-              ? { onEpochEnd: (epoch, logs) => onEpochEnd(epoch, logs, head.tag) }
-              : undefined,
-          });
-        } finally {
-          yTensor.dispose();
-        }
-
-        head.trainedSampleCount = n;
-        head.trainingHistory = {
-          finalLoss:        history.history.loss?.slice(-1)[0] ?? null,
-          finalValLoss:     history.history.val_loss?.slice(-1)[0] ?? null,
-          finalAccuracy:    history.history.acc?.slice(-1)[0]
-                         ?? history.history.accuracy?.slice(-1)[0] ?? null,
-          finalValAccuracy: history.history.val_acc?.slice(-1)[0]
-                         ?? history.history.val_accuracy?.slice(-1)[0] ?? null,
-          epochs: cfg.CLASSIFIER_EPOCHS,
-        };
-        if (head.mode === 'classification') {
-          head.validationAccuracy = head.trainingHistory.finalValAccuracy;
-        }
+    for (const head of this.heads) {
+      const labels = labelsByMode[head.mode];
+      if (!labels || labels.length !== n) {
+        throw new Error(`train: missing/mismatched labels for mode "${head.mode}"`);
       }
-    } finally {
-      xTensor.dispose();
+
+      const dim = head.featureIndices.length;
+      const xs = new Float32Array(n * dim);
+      for (let i = 0; i < n; i++) {
+        xs.set(this._projectFeaturesForHead(head, features[i]), i * dim);
+      }
+      const xTensor = tf.tensor2d(xs, [n, dim]);
+
+      let yTensor;
+      if (head.mode === 'regression') {
+        const ys = new Float32Array(n * 2);
+        for (let i = 0; i < n; i++) {
+          ys[i * 2]     = labels[i].x;
+          ys[i * 2 + 1] = labels[i].y;
+        }
+        yTensor = tf.tensor2d(ys, [n, 2]);
+      } else {
+        const numClasses = head.brickIds.length;
+        const ys = new Float32Array(n * numClasses);
+        for (let i = 0; i < n; i++) {
+          const classIdx = head.brickIds.indexOf(labels[i]);
+          if (classIdx < 0) throw new Error(`unknown label "${labels[i]}"`);
+          ys[i * numClasses + classIdx] = 1;
+        }
+        yTensor = tf.tensor2d(ys, [n, numClasses]);
+      }
+
+      let history;
+      try {
+        history = await head.model.fit(xTensor, yTensor, {
+          epochs: cfg.CLASSIFIER_EPOCHS,
+          batchSize: cfg.CLASSIFIER_BATCH_SIZE,
+          shuffle: true,
+          validationSplit: 0.1,
+          callbacks: onEpochEnd
+            ? { onEpochEnd: (epoch, logs) => onEpochEnd(epoch, logs, head.tag) }
+            : undefined,
+        });
+      } finally {
+        xTensor.dispose();
+        yTensor.dispose();
+      }
+
+      head.trainedSampleCount = n;
+      head.trainingHistory = {
+        finalLoss:        history.history.loss?.slice(-1)[0] ?? null,
+        finalValLoss:     history.history.val_loss?.slice(-1)[0] ?? null,
+        finalAccuracy:    history.history.acc?.slice(-1)[0]
+                       ?? history.history.accuracy?.slice(-1)[0] ?? null,
+        finalValAccuracy: history.history.val_acc?.slice(-1)[0]
+                       ?? history.history.val_accuracy?.slice(-1)[0] ?? null,
+        epochs: cfg.CLASSIFIER_EPOCHS,
+      };
+      if (head.mode === 'classification') {
+        head.validationAccuracy = head.trainingHistory.finalValAccuracy;
+      }
     }
 
     this.trainedAt = new Date().toISOString();
@@ -216,10 +221,13 @@ window.Classifier = {
   predict(normalizedFeatures) {
     if (this.heads.length === 0) return [];
     return tf.tidy(() => {
-      const input = tf.tensor2d(normalizedFeatures, [1, normalizedFeatures.length]);
       return this.heads.map(head => {
+        const projected = this._projectFeaturesForHead(head, normalizedFeatures);
+        const input = tf.tensor2d(projected, [1, projected.length]);
         const output = head.model.predict(input);
         const vals = output.dataSync();
+        input.dispose();
+        output.dispose();
         if (head.mode === 'regression') {
           return { tag: head.tag, mode: head.mode, raw: { x: vals[0], y: vals[1] } };
         }
@@ -299,11 +307,20 @@ window.Classifier = {
     }
 
     // classification
-    let bestId = null, bestProb = -1;
+    let bestId = null, bestProb = -1, secondProb = -1;
     for (const id of Object.keys(raw)) {
-      if (raw[id] > bestProb) { bestProb = raw[id]; bestId = id; }
+      if (raw[id] > bestProb) {
+        secondProb = bestProb;
+        bestProb = raw[id];
+        bestId = id;
+      } else if (raw[id] > secondProb) {
+        secondProb = raw[id];
+      }
     }
     if (bestProb < cfg.CONFIDENCE_THRESHOLD) return null;
+    if ((bestProb - Math.max(0, secondProb)) < (cfg.CLASSIFICATION_MARGIN_THRESHOLD ?? 0)) {
+      return null;
+    }
     if (bestId === 'elsewhere') return null;
     return bestId;
   },
@@ -356,11 +373,12 @@ window.Classifier = {
     for (let i = 0; i < features.length; i++) {
       const preds = this.predict(features[i]);
       const raw = preds.find(p => p.tag === head.tag).raw;
-      let bestId = null, bestProb = -1;
-      for (const id of Object.keys(raw)) {
-        if (raw[id] > bestProb) { bestProb = raw[id]; bestId = id; }
+      const resolved = this._resolveOne(head, raw, features[i]);
+      if (labels[i] === 'elsewhere') {
+        if (resolved === null) correct++;
+      } else if (resolved === labels[i]) {
+        correct++;
       }
-      if (bestId === labels[i]) correct++;
     }
     const acc = correct / features.length;
     head.validationAccuracy = acc;
@@ -378,6 +396,8 @@ window.Classifier = {
         mode: h.mode,
         hidden: h.hidden,
         lr: h.lr,
+        featureProfile: h.featureProfile,
+        featureIndices: h.featureIndices.slice(),
         classes: h.mode === 'classification' ? h.brickIds.slice() : null,
         trainedOn: h.trainedSampleCount,
         history: h.trainingHistory,
@@ -394,5 +414,11 @@ window.Classifier = {
     this.heads = [];
     this.primaryIdx = 0;
     this.trainedAt = null;
+  },
+
+  _projectFeaturesForHead(head, features) {
+    return window.Features
+      ? window.Features.project(features, head.featureIndices)
+      : features;
   },
 };

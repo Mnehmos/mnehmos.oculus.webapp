@@ -30,7 +30,10 @@ window.runPipelineTests = async function runPipelineTests() {
 
       await Test.test('sets up: train classifier on 3 brick fixtures', async () => {
         const classes = ['B01', 'B02', 'B03', 'elsewhere'];
-        window.Classifier.build({ mode: 'classification', brickIds: classes });
+        window.Classifier.build([
+          { tag: 'CLS', mode: 'classification', brickIds: classes, featureProfile: 'eyes_pose' },
+          { tag: 'REGDBG', mode: 'regression', featureProfile: 'all' },
+        ]);
 
         // Build training sets per class using irisX as distinguisher
         // B01 = gaze left   (irisX = -0.6)
@@ -59,10 +62,22 @@ window.runPipelineTests = async function runPipelineTests() {
         const featureRows = rawFixtures.map(f => window.Features.extract(f));
         window.Features.computeNormalization(featureRows);
         const normalized = featureRows.map(f => window.Features.normalize(f));
-        await window.Classifier.train(normalized, { classification: labels });
+        const regressionLabels = labels.map(cls => {
+          if (cls === 'B01') return { x: 0.2, y: 0.5 };
+          if (cls === 'B02') return { x: 0.5, y: 0.5 };
+          if (cls === 'B03') return { x: 0.8, y: 0.5 };
+          return { x: 0.5, y: 0.5 };
+        });
+        await window.Classifier.train(normalized, {
+          classification: labels,
+          regression: regressionLabels,
+        });
 
-        const scores = window.Classifier.validate(normalized, { classification: labels });
-        const acc = scores[window.Classifier.heads[0].tag];
+        const scores = window.Classifier.validate(normalized, {
+          classification: labels,
+          regression: regressionLabels,
+        });
+        const acc = scores.CLS;
         Test.assert(acc > 0.85, `training accuracy ${acc} too low (check features?)`);
       }, 20000);
 
@@ -122,6 +137,8 @@ window.runPipelineTests = async function runPipelineTests() {
         window.Gaze.tick(null, false);
 
         Test.assert(window.Gaze.lastPrediction.faceDetected, 'faceDetected false');
+        Test.assert(window.Gaze.lastPrediction.coords != null,
+                    'regression debug coords should be exposed');
         Test.assert(window.Gaze.lastPrediction.confidence >= 0
                  && window.Gaze.lastPrediction.confidence <= 1,
                  'confidence not in [0,1]');

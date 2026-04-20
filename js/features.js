@@ -44,6 +44,11 @@
 window.Features = {
 
   DIM: 24,
+  FEATURE_PROFILES: {
+    eyes_only: [0, 1, 2, 3, 4, 5, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23],
+    eyes_pose: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23],
+    all: Array.from({ length: 24 }, (_, i) => i),
+  },
 
   // Normalization state (set during calibration by computeNormalization)
   mean: null,
@@ -288,6 +293,29 @@ window.Features = {
       mean: this.mean ? Array.from(this.mean) : null,
       std:  this.std  ? Array.from(this.std)  : null,
     };
+  },
+
+  resolveFeatureIndices(profileOrIndices) {
+    if (Array.isArray(profileOrIndices) && profileOrIndices.length > 0) {
+      return profileOrIndices.slice();
+    }
+    if (typeof profileOrIndices === 'string' && this.FEATURE_PROFILES[profileOrIndices]) {
+      return this.FEATURE_PROFILES[profileOrIndices].slice();
+    }
+    return this.FEATURE_PROFILES.all.slice();
+  },
+
+  project(features, profileOrIndices) {
+    const indices = this.resolveFeatureIndices(profileOrIndices);
+    if (!features || indices.length === 0) return new Float32Array(0);
+    if (indices.length === this.DIM && indices.every((idx, i) => idx === i)) {
+      return features;
+    }
+    const out = new Float32Array(indices.length);
+    for (let i = 0; i < indices.length; i++) {
+      out[i] = features[indices[i]];
+    }
+    return out;
   },
 
   reset() {

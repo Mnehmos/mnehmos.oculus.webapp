@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Oculus — Reader</title>
+  <title>Oculus - Reader</title>
   <link rel="icon" href="favicon.ico" type="image/x-icon">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="css/app.css">
 
   <!--
-    TensorFlow.js (Apache 2.0) — in-browser MLP training/inference for the
+    TensorFlow.js (Apache 2.0) - in-browser MLP training/inference for the
     classifier-direct AOI gaze pipeline. MediaPipe Face Landmarker is loaded
     via dynamic import inside js/face_landmarker.js (it ships as ES module
     only, so we can't use a plain <script> tag without converting the rest
@@ -20,7 +20,7 @@
   -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
 
-  <!-- Hidden <video> for the webcam stream — consumed by FaceLandmarker. -->
+  <!-- Hidden <video> for the webcam stream - consumed by FaceLandmarker. -->
 </head>
 <body class="has-grid">
 
@@ -39,10 +39,9 @@
   <div id="cal-intro">
     <div class="cal-title">Calibrate Oculus</div>
     <div class="cal-subtitle">
-      Oculus uses your webcam to learn where each paragraph is. You'll see
-      a preview of your face, then click 15 dots across the screen while
-      looking at each one. Sit steady — the calibration only holds as long
-      as your head position does.<br><br>
+      Oculus uses your webcam to learn which reading panel you're on. You'll
+      see a preview of your face, then click the glowing dot on each highlighted
+      panel while keeping your gaze and head steady for a short capture.<br><br>
       <strong>Tip:</strong> turning <em>Lighting: ON</em> makes the monitor
       act as a soft fill light on your face and measurably improves
       tracking accuracy.
@@ -106,15 +105,15 @@
 
 <!-- ================= FOOTER CONTROLS ================= -->
 <div class="footer-controls" id="footer-controls" style="display:none;">
-  <button class="ctrl-btn" id="btn-home">◂ HOME</button>
+  <button class="ctrl-btn" id="btn-home">&lt; HOME</button>
   <button class="ctrl-btn" id="btn-recalibrate">RECALIBRATE</button>
   <button class="ctrl-btn" id="btn-export">EXPORT SESSION</button>
   <button class="ctrl-btn" id="btn-toggle-cursor">TOGGLE CURSOR</button>
   <button class="ctrl-btn" id="btn-toggle-lighting">LIGHTING: DARK</button>
   <span style="flex: 1"></span>
-  <button class="ctrl-btn" id="btn-prev-page" disabled>◂ PREV PAGE</button>
+  <button class="ctrl-btn" id="btn-prev-page" disabled>&lt; PREV PAGE</button>
   <span class="ctrl-btn" id="page-indicator" style="pointer-events: none;">1 / 1</span>
-  <button class="ctrl-btn" id="btn-next-page" disabled>NEXT PAGE ▸</button>
+  <button class="ctrl-btn" id="btn-next-page" disabled>NEXT PAGE &gt;</button>
 </div>
 
 <!-- ================= MODULES ================= -->

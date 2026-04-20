@@ -112,4 +112,25 @@ window.runFeatureTests = async function runFeatureTests() {
       Test.assertEqual(exp.mean.length, 24, 'mean length wrong');
     });
   });
+
+  await Test.suite('features.js — feature profiles', async () => {
+
+    await Test.test('resolveFeatureIndices returns eyes_pose profile', () => {
+      const idx = window.Features.resolveFeatureIndices('eyes_pose');
+      Test.assertEqual(idx.length, 20, 'eyes_pose should expose 20 dims');
+      Test.assertEqual(idx[0], 0, 'eyes_pose should start with iris features');
+      Test.assertEqual(idx[idx.length - 1], 23, 'eyes_pose should include eyeLookUpRight');
+    });
+
+    await Test.test('project() slices the requested features', () => {
+      const f = new Float32Array(24);
+      for (let i = 0; i < 24; i++) f[i] = i;
+      const projected = window.Features.project(f, [0, 6, 9, 23]);
+      Test.assertEqual(projected.length, 4, 'projected length wrong');
+      Test.assertEqual(projected[0], 0, 'dim 0 wrong');
+      Test.assertEqual(projected[1], 6, 'dim 6 wrong');
+      Test.assertEqual(projected[2], 9, 'dim 9 wrong');
+      Test.assertEqual(projected[3], 23, 'dim 23 wrong');
+    });
+  });
 };
